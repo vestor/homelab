@@ -7,20 +7,22 @@ This repository contains Terraform configurations to deploy and manage a compreh
 - **Storage Management**: MergerFS for unified storage across multiple disks
 - **Reverse Proxy**: Traefik for service routing with hostname-based access
 - **Media Management**:
-  - **Plex & Jellyfin**: Media servers with transcoding capabilities
+  - **Jellyfin**: Media server with transcoding capabilities
   - **Sonarr**: TV show management and automation
   - **Radarr**: Movie management and automation
   - **Bazarr**: Subtitle management for Sonarr and Radarr
   - **Prowlarr**: Indexer management for *arr applications
   - **qBittorrent**: Download client
-  - **Overseerr**: Media request and management
+  - **Jellyseerr**: Media request and management
 - **Home Automation**:
   - **Home Assistant**: Smart home control and automation
   - **HyperHDR**: Ambient lighting control
 - **System Management**:
-  - **Portainer**: Docker container management
   - **Tailscale**: Secure remote access
   - **Homepage**: Unified dashboard for system monitoring and service access
+  - **Watchtower**: Automatic updates for Docker containers
+  - **WhatSup Docker**: Docker container monitoring
+  - **CoreDNS**: DNS server for local network
 
 ## Prerequisites
 
@@ -45,8 +47,9 @@ This repository contains Terraform configurations to deploy and manage a compreh
    domain_name = "yourdomain.local"
    timezone = "Your/Timezone"
    storage_disks = ["uuid1", "uuid2"] # UUIDs of your storage disks
-   plex_claim = "claim-xxxxxxxx" # Get from https://plex.tv/claim
    tailscale_auth_key = "tskey-auth-xxxxxxxx" # Your Tailscale auth key
+   cloudflare_api_token = "your-cloudflare-api-token"
+   cloudflare_email = "your-cloudflare-email"
    ```
 
 3. Initialize Terraform:
@@ -66,17 +69,16 @@ This repository contains Terraform configurations to deploy and manage a compreh
 After deployment, services will be available at the following URLs:
 
 - Homepage Dashboard: https://homepage.yourdomain.local
-- Plex: https://plex.yourdomain.local
 - Jellyfin: https://jellyfin.yourdomain.local
 - Sonarr: https://sonarr.yourdomain.local
 - Radarr: https://radarr.yourdomain.local
 - Bazarr: https://bazarr.yourdomain.local
 - Prowlarr: https://prowlarr.yourdomain.local
 - qBittorrent: https://qbittorrent.yourdomain.local
-- Overseerr: https://overseerr.yourdomain.local
+- Jellyseerr: https://jellyseerr.yourdomain.local
 - HomeAssistant: https://homeassistant.yourdomain.local
-- Portainer: https://portainer.yourdomain.local
 - HyperHDR: Access via IP address on port 8090
+- WhatSup Docker: https://whatsup.yourdomain.local
 
 ## Storage Configuration
 
@@ -99,19 +101,18 @@ To add new storage:
 
 To update containers to the latest version:
 
-1. Either use Portainer to update individual containers
+1. Either use Docker CLI from the host system to update individual containers
 2. Or run `terraform apply` to update all configurations
 
 ### Backups
 
 Container configurations are stored in Docker volumes. To back them up:
 
-1. Use the Portainer interface to create volume backups
-2. Or use Docker CLI from the host system to export volumes
+1. Use Docker CLI from the host system to export volumes
 
 ## Troubleshooting
 
-- **Service not responding**: Check container status using Portainer or `docker ps`
+- **Service not responding**: Check container status using `docker ps`
 - **Network connectivity issues**: Verify Traefik is running and check network configurations
 - **Storage issues**: Check disk mounts with `mount` command and verify MergerFS service is running
 
