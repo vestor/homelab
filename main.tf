@@ -51,18 +51,24 @@ variable "storage_mount_base" {
   default     = "/mnt/disks"
 }
 
-variable "plex_claim" {
-  description = "Plex claim token from https://plex.tv/claim"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
 variable "tailscale_auth_key" {
   description = "Tailscale authentication key"
   type        = string
   sensitive   = true
 }
+
+# Add Cloudflare API token as a variable
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS verification"
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_email" {
+  description = "Cloudflare account email"
+  type        = string
+}
+
 
 # Configure the Docker provider to use SSH
 provider "docker" {
@@ -87,8 +93,6 @@ resource "docker_network" "media_net" {
 }
 
 # Create Docker volumes
-resource "docker_volume" "plex_config" { name = "plex_config" }
-resource "docker_volume" "plex_transcode" { name = "plex_transcode" }
 resource "docker_volume" "radarr_config" { name = "radarr_config" }
 resource "docker_volume" "sonarr_config" { name = "sonarr_config" }
 resource "docker_volume" "prowlarr_config" { name = "prowlarr_config" }
@@ -98,8 +102,11 @@ resource "docker_volume" "homeassistant_config" { name = "homeassistant_config" 
 resource "docker_volume" "traefik_config" { name = "traefik_config" }
 resource "docker_volume" "traefik_acme" { name = "traefik_acme" }
 resource "docker_volume" "tailscale_data" { name = "tailscale_data" }
-resource "docker_volume" "portainer_data" { name = "portainer_data" }
-resource "docker_volume" "overseerr_config" { name = "overseerr_config" }
+resource "docker_volume" "jellyseerr_config" { name = "jellyseerr_config" }
+resource "docker_volume" "watchtower_config" { name = "watchtower_config" }
+resource "docker_volume" "bazarr_config" { name = "bazarr_config" }
+resource "docker_volume" "whatsup_docker_data" { name = "whatsup_docker_data" }
+
 
 # Setup disk mounting with UUIDs
 resource "null_resource" "setup_disk_mounts" {
@@ -158,18 +165,34 @@ resource "null_resource" "setup_disk_mounts" {
   }
 }
 
-# Add a socket proxy container
 resource "docker_container" "socket_proxy" {
   name  = "socket-proxy"
   image = "tecnativa/docker-socket-proxy:latest"
   restart = "unless-stopped"
   privileged = true
 
+  # Add port mapping for Docker API
+  ports {
+    internal = 2375
+    external = 2375
+  }
+
   env = [
-    "CONTAINERS=1",
-    "NETWORKS=1",
-    "SERVICES=1",
-    "TASKS=1"
+    "CONTAINERS=1",        # Allow listing containers
+    "NETWORKS=1",          # Allow network operations
+    "SERVICES=1",          # Allow service operations
+    "TASKS=1",             # Allow task operations
+    "IMAGES=1",            # Allow image operations - needed by Watchtower
+    "VOLUMES=1",           # Allow volume operations
+    "VERSION=1",           # Allow version check
+    "AUTH=1",              # Allow authentication operations
+    "DISTRIBUTION=1",      # Allow distribution operations
+    "POST=1",              # Allow POST operations (needed for updates)
+    "BUILD=1",             # Allow build operations
+    "COMMIT=1",            # Allow commit operations
+    "CONFIGS=1",           # Allow config operations
+    "EXEC=1",              # Allow exec operations
+    "NODES=1"              # Allow node operations
   ]
 
   volumes {
@@ -226,8 +249,9 @@ resource "docker_container" "mergerfs" {
 
   depends_on = [null_resource.setup_disk_mounts]
 }
-resource "null_resource" "traefik_config" {
 
+# Update the Traefik configuration with Cloudflare and Let's Encrypt
+resource "null_resource" "traefik_config" {
   connection {
     type        = "ssh"
     user        = var.ssh_user
@@ -242,46 +266,108 @@ resource "null_resource" "traefik_config" {
       "entryPoints:",
       "  web:",
       "    address: ':80'",
+      "    http:",
+      "      redirections:",
+      "        entryPoint:",
+      "          to: websecure",
+      "          scheme: https",
+      "  websecure:",
+      "    address: ':443'",
+      "  tailscale:",
+      "    address: ':8443'",
+      "",
       "providers:",
       "  docker:",
       "    endpoint: 'tcp://socket-proxy:2375'",
       "    exposedByDefault: false",
       "    network: traefik_net",
+      "    swarmMode: false",
+      "    watch: true",
+      "",
       "api:",
       "  dashboard: true",
       "  insecure: true",
+      "",
+      "certificatesResolvers:",
+      "  cloudflare:",
+      "    acme:",
+      "      email: '${var.cloudflare_email}'",
+      "      storage: /acme/acme.json",
+      "      dnsChallenge:",
+      "        provider: cloudflare",
+      "        resolvers:",
+      "          - '1.1.1.1:53'",
+      "          - '1.0.0.1:53'",
+      "",
+      "log:",
+      "  level: 'INFO'",
       "EOL",
       "sudo cp /tmp/traefik.yml /var/lib/docker/volumes/traefik_config/_data/",
+
+      # Create dynamic configuration for middleware
+      "sudo mkdir -p /var/lib/docker/volumes/traefik_config/_data/configs",
+      "sudo cat > /tmp/dynamic.yml << 'EOL'",
+      "http:",
+      "  middlewares:",
+      "    tailscale-ip-whitelist:",
+      "      ipWhiteList:",
+      "        sourceRange:",
+      "          - '127.0.0.1/32'       # Local traffic",
+      "          - '192.168.0.0/16'     # Local LAN traffic",
+      "          - '10.0.0.0/8'         # Tailscale IP range",
+      "          - '100.64.0.0/10'      # Tailscale IP range (CGNAT)",
+      "",
+      "    local-ip-whitelist:",
+      "      ipWhiteList:",
+      "        sourceRange:",
+      "          - '127.0.0.1/32'       # Local traffic",
+      "          - '192.168.0.0/16'     # Local LAN traffic",
+      "EOL",
+      "sudo cp /tmp/dynamic.yml /var/lib/docker/volumes/traefik_config/_data/configs/",
       "sudo chmod 644 /var/lib/docker/volumes/traefik_config/_data/traefik.yml",
-      "rm /tmp/traefik.yml"
+      "sudo chmod 644 /var/lib/docker/volumes/traefik_config/_data/configs/dynamic.yml",
+      "rm /tmp/traefik.yml /tmp/dynamic.yml"
     ]
   }
 }
 
-# Traefik
+# Update the Traefik container with HTTPS support and Cloudflare DNS
 resource "docker_container" "traefik" {
   name  = "traefik"
   image = "traefik:v2.10"
   restart = "unless-stopped"
   user = "0:0"
 
-  privileged = true
-
+  # Add a brief delay before Traefik starts to ensure socket-proxy is ready
+  command = [
+    "sh", "-c",
+    "sleep 5 && /usr/local/bin/traefik --configFile=/etc/traefik/traefik.yml"
+  ]
 
   ports {
     internal = 80
     external = 80
   }
   ports {
+    internal = 443
+    external = 443
+  }
+  ports {
     internal = 8080
     external = 8080
   }
-
-  volumes {
-    host_path      = "/var/run/docker.sock"
-    container_path = "/var/run/docker.sock"
-    read_only      = true
+  ports {
+    internal = 8443
+    external = 8443
   }
+
+  env = [
+    "CF_API_EMAIL=${var.cloudflare_email}",
+    "CF_API_KEY=${var.cloudflare_api_token}",
+    "CF_ZONE_API_TOKEN=${var.cloudflare_api_token}",
+    "TZ=${var.timezone}"
+  ]
+
   volumes {
     volume_name    = docker_volume.traefik_config.name
     container_path = "/etc/traefik"
@@ -295,23 +381,12 @@ resource "docker_container" "traefik" {
     name = docker_network.traefik_net.name
   }
 
-  # Add a healthcheck to verify Traefik is running properly
-  healthcheck {
-    test         = ["CMD", "wget", "--spider", "http://localhost:8080/api/rawdata"]
-    interval     = "10s"
-    timeout      = "3s"
-    start_period = "5s"
-    retries      = 3
-  }
-
-  # Add a command to explicitly specify the config file location
-  command = [
-    "--configFile=/etc/traefik/traefik.yml"
+  depends_on = [
+    docker_container.socket_proxy,
+    null_resource.traefik_config,
+    docker_network.traefik_net
   ]
-
-  depends_on = [null_resource.traefik_config, docker_network.traefik_net]
 }
-
 # Tailscale
 resource "docker_container" "tailscale" {
   name  = "tailscale"
@@ -333,71 +408,6 @@ resource "docker_container" "tailscale" {
     host_path      = "/dev/net/tun"
     container_path = "/dev/net/tun"
   }
-}
-
-# Plex
-resource "docker_container" "plex" {
-  name  = "plex"
-  image = "plexinc/pms-docker:latest"
-  restart = "unless-stopped"
-
-
-  env = [
-    "TZ=${var.timezone}",
-    "PLEX_UID=1000",
-    "PLEX_GID=1000",
-    "PLEX_CLAIM=${var.plex_claim}"
-  ]
-
-
-
-  ports {
-    internal = 32400
-    external = 32400
-  }
-
-  volumes {
-    volume_name    = docker_volume.plex_config.name
-    container_path = "/config"
-  }
-  volumes {
-    volume_name    = docker_volume.plex_transcode.name
-    container_path = "/transcode"
-  }
-  volumes {
-    host_path      = "${var.mergerfs_mount_path}/media"
-    container_path = "/data"
-  }
-
-  networks_advanced {
-    name = docker_network.media_net.name
-  }
-  networks_advanced {
-    name = docker_network.traefik_net.name
-  }
-
-  labels {
-    label = "traefik.enable"
-    value = "true"
-  }
-  labels {
-    label = "traefik.http.routers.plex.rule"
-    value = "Host(`plex.${var.domain_name}`)"
-  }
-  labels {
-    label = "traefik.http.routers.plex.entrypoints"
-    value = "web"
-  }
-  # labels {
-  #   label = "traefik.http.routers.plex.tls"
-  #   value = "true"
-  # }
-  labels {
-    label = "traefik.http.services.plex.loadbalancer.server.port"
-    value = "32400"
-  }
-
-  depends_on = [docker_container.mergerfs, docker_network.media_net]
 }
 
 # Radarr
@@ -568,9 +578,6 @@ resource "docker_container" "prowlarr" {
   depends_on = [docker_network.media_net]
 }
 
-# Add Docker volume for Bazarr
-resource "docker_volume" "bazarr_config" { name = "bazarr_config" }
-
 # Bazarr container
 resource "docker_container" "bazarr" {
   name  = "bazarr"
@@ -690,7 +697,7 @@ resource "docker_container" "qbittorrent" {
   # }
   labels {
     label = "traefik.http.services.qbittorrent.loadbalancer.server.port"
-    value = "8080"
+    value = "8099"
   }
 
   depends_on = [docker_container.mergerfs, docker_network.media_net]
@@ -744,59 +751,7 @@ resource "docker_container" "homeassistant" {
   depends_on = [docker_network.traefik_net]
 }
 
-# Portainer
-resource "docker_container" "portainer" {
-  name  = "portainer"
-  image = "portainer/portainer-ce:lts"
-  restart = "unless-stopped"
 
-  ports {
-    internal = 9000
-    external = 9000
-  }
-  ports {
-    internal = 9443
-    external = 9443
-  }
-
-  volumes {
-    volume_name    = docker_volume.portainer_data.name
-    container_path = "/data"
-  }
-  volumes {
-    host_path      = "/var/run/docker.sock"
-    container_path = "/var/run/docker.sock"
-  }
-
-  networks_advanced {
-    name = docker_network.traefik_net.name
-  }
-
-  labels {
-    label = "traefik.enable"
-    value = "true"
-  }
-  labels {
-    label = "traefik.http.routers.portainer.rule"
-    value = "Host(`portainer.${var.domain_name}`)"
-  }
-  labels {
-    label = "traefik.http.routers.portainer.entrypoints"
-    value = "web"
-  }
-  # labels {
-  #   label = "traefik.http.routers.portainer.tls"
-  #   value = "true"
-  # }
-  labels {
-    label = "traefik.http.services.portainer.loadbalancer.server.port"
-    value = "9000"
-  }
-
-  depends_on = [docker_network.traefik_net]
-}
-
-# First, create a place for the Dockerfile that's accessible to both SSH and Docker
 resource "null_resource" "prepare_hyperhdr_context" {
   connection {
     type        = "ssh"
@@ -809,34 +764,24 @@ resource "null_resource" "prepare_hyperhdr_context" {
     inline = [
       # Create build directory in a location accessible to docker
       "sudo mkdir -p /opt/docker-builds/hyperhdr",
-      "sudo chmod 777 /opt/docker-builds/hyperhdr",
-
-      # Create the Dockerfile
-      "cat > /opt/docker-builds/hyperhdr/Dockerfile << 'EOL'",
-      "FROM ubuntu:jammy",
-      "ENV DEBIAN_FRONTEND=noninteractive",
-      "RUN apt-get update && \\",
-      "apt-get install -y --no-install-recommends wget ca-certificates && \\",
-      "rm -rf /var/lib/apt/lists/*",
-      "RUN wget -qP /tmp https://github.com/awawa-dev/HyperHDR/releases/download/v21.0.0.0beta2/HyperHDR-21.0.0.0.jammy.beta2-x86_64.deb && \\",
-      "apt-get update && \\",
-      "apt-get install -y --no-install-recommends /tmp/HyperHDR-21.0.0.0.jammy.beta2-x86_64.deb && \\",
-      "rm -rf /tmp/* /var/lib/apt/lists/* /var/tmp/*",
-      "RUN mkdir -p /config && chmod -R 777 /config",
-      "EXPOSE 8090 8092 19400 19444 19445",
-      "ENTRYPOINT [\"hyperhdr\", \"-v\", \"-u=/config\"]",
-      "EOL",
-
-      # Verify the file is created
-      "ls -la /opt/docker-builds/hyperhdr/",
-      "cat /opt/docker-builds/hyperhdr/Dockerfile"
+      "sudo chmod 777 /opt/docker-builds/hyperhdr"
     ]
+  }
+
+  # Upload the Dockerfile from local templates folder to the remote server
+  provisioner "file" {
+    source      = "${path.module}/templates/hyperhdr.dockerfile"
+    destination = "/opt/docker-builds/hyperhdr/Dockerfile"
   }
 }
 
-# Now use a simpler command-line approach to build the image
 resource "null_resource" "build_hyperhdr_image" {
   depends_on = [null_resource.prepare_hyperhdr_context]
+
+  # Add a trigger that changes whenever the Dockerfile changes
+  triggers = {
+    dockerfile_sha1 = sha1(file("${path.module}/templates/hyperhdr.dockerfile"))
+  }
 
   connection {
     type        = "ssh"
@@ -847,9 +792,10 @@ resource "null_resource" "build_hyperhdr_image" {
 
   provisioner "remote-exec" {
     inline = [
-      # Build the image using the created Dockerfile
+      # Remove any existing image first to force rebuild
+      "sudo docker image rm -f custom-hyperhdr:latest || true",
+      # Build the image using the uploaded Dockerfile
       "cd /opt/docker-builds/hyperhdr && sudo docker build -t custom-hyperhdr:latest .",
-
       # Verify the image was created
       "sudo docker images | grep custom-hyperhdr"
     ]
@@ -874,10 +820,10 @@ resource "docker_container" "hyperhdr" {
 
 
 
-# Overseerr container
-resource "docker_container" "overseerr" {
-  name  = "overseerr"
-  image = "sctx/overseerr:latest"
+# jellyseerr container
+resource "docker_container" "jellyseerr" {
+  name  = "jellyseerr"
+  image = "ghcr.io/fallenbagel/jellyseerr:latest"
   restart = "unless-stopped"
 
   env = [
@@ -892,7 +838,7 @@ resource "docker_container" "overseerr" {
   }
 
   volumes {
-    volume_name    = docker_volume.overseerr_config.name
+    volume_name    = docker_volume.jellyseerr_config.name
     container_path = "/app/config"
   }
 
@@ -908,23 +854,23 @@ resource "docker_container" "overseerr" {
     value = "true"
   }
   labels {
-    label = "traefik.http.routers.overseerr.rule"
-    value = "Host(`overseerr.${var.domain_name}`)"
+    label = "traefik.http.routers.jellyseerr.rule"
+    value = "Host(`jellyseerr.${var.domain_name}`)"
   }
   labels {
-    label = "traefik.http.routers.overseerr.entrypoints"
+    label = "traefik.http.routers.jellyseerr.entrypoints"
     value = "web"
   }
   # labels {
-  #   label = "traefik.http.routers.overseerr.tls"
+  #   label = "traefik.http.routers.jellyseerr.tls"
   #   value = "true"
   # }
   labels {
-    label = "traefik.http.services.overseerr.loadbalancer.server.port"
+    label = "traefik.http.services.jellyseerr.loadbalancer.server.port"
     value = "5055"
   }
 
-  depends_on = [docker_network.media_net, docker_container.plex]
+  depends_on = [docker_network.media_net]
 }
 
 
@@ -1004,22 +950,326 @@ resource "docker_container" "jellyfin" {
   depends_on = [docker_container.mergerfs, docker_network.media_net]
 }
 
-# Update the output to include Jellyfin
+# Homepage container
+# Create Docker volume for Homepage
+resource "docker_volume" "homepage_config" { name = "homepage_config" }
+
+# Homepage container
+resource "docker_container" "homepage" {
+  name  = "homepage"
+  image = "ghcr.io/gethomepage/homepage:latest"
+  restart = "unless-stopped"
+
+  env = [
+    "PUID=1000",
+    "PGID=1000",
+    "TZ=${var.timezone}",
+    # Environment variables to enable service discovery
+    "HOMEPAGE_VAR_DOCKER_HOST=socket-proxy",
+    "HOMEPAGE_VAR_DOCKER_PORT=2375",
+    "HOMEPAGE_VAR_DOCKER_SOCKET=tcp",
+    "HOMEPAGE_ALLOWED_HOSTS=homelab:3000,localhost:3000,127.0.0.1:3000"
+  ]
+
+  ports {
+    internal = 3000
+    external = 3000
+  }
+
+  volumes {
+    volume_name    = docker_volume.homepage_config.name
+    container_path = "/app/config"
+  }
+
+  networks_advanced {
+    name = docker_network.traefik_net.name
+  }
+
+  labels {
+    label = "traefik.enable"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.homepage.rule"
+    value = "Host(`homepage.${var.domain_name}`)"
+  }
+  labels {
+    label = "traefik.http.routers.homepage.entrypoints"
+    value = "web"
+  }
+  # labels {
+  #   label = "traefik.http.routers.homepage.tls"
+  #   value = "true"
+  # }
+  labels {
+    label = "traefik.http.services.homepage.loadbalancer.server.port"
+    value = "3000"
+  }
+
+  depends_on = [
+    docker_container.socket_proxy,
+    docker_network.traefik_net,
+    null_resource.homepage_config_files
+  ]
+}
+
+# Copy config files to the remote server
+resource "null_resource" "homepage_config_files" {
+  connection {
+    type        = "ssh"
+    user        = var.ssh_user
+    host        = var.ssh_host
+    private_key = file(var.ssh_key_path)
+  }
+
+  # Use a trigger to update configs when the template content changes
+  triggers = {
+    services_sha1 = sha1(templatefile("${path.module}/templates/services.yaml.tftpl", {
+      domain_name = var.domain_name
+      ssh_host = var.ssh_host
+    }))
+    settings_sha1 = sha1(templatefile("${path.module}/templates/settings.yaml.tftpl", {}))
+    widgets_sha1 = sha1(templatefile("${path.module}/templates/widgets.yaml.tftpl", {
+      mergerfs_mount_path = var.mergerfs_mount_path
+    }))
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "mkdir -p /tmp/homepage-config"
+    ]
+  }
+
+  # Upload the rendered template files to the server
+  provisioner "file" {
+    content     = templatefile("${path.module}/templates/services.yaml.tftpl", {
+      domain_name = var.domain_name
+      ssh_host = var.ssh_host
+    })
+    destination = "/tmp/homepage-config/services.yaml"
+  }
+
+  provisioner "file" {
+    content     = templatefile("${path.module}/templates/settings.yaml.tftpl", {})
+    destination = "/tmp/homepage-config/settings.yaml"
+  }
+
+  provisioner "file" {
+    content     = templatefile("${path.module}/templates/widgets.yaml.tftpl", {
+      mergerfs_mount_path = var.mergerfs_mount_path
+    })
+    destination = "/tmp/homepage-config/widgets.yaml"
+  }
+
+  # Copy files to the Docker volume
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /var/lib/docker/volumes/homepage_config/_data",
+      "sudo cp /tmp/homepage-config/*.yaml /var/lib/docker/volumes/homepage_config/_data/",
+      "sudo chown -R 1000:1000 /var/lib/docker/volumes/homepage_config/_data/",
+      "sudo chmod -R 755 /var/lib/docker/volumes/homepage_config/_data/",
+      "rm -rf /tmp/homepage-config"
+    ]
+  }
+}
+
+# Watchtower container
+resource "docker_container" "watchtower" {
+  name  = "watchtower"
+  image = "containrrr/watchtower:latest"
+  restart = "unless-stopped"
+
+  env = [
+    "TZ=${var.timezone}",
+    "WATCHTOWER_CLEANUP=true",                 # Remove old images
+    "WATCHTOWER_INCLUDE_STOPPED=false",        # Only update running containers
+    "WATCHTOWER_NOTIFICATION_REPORT=true",     # More detailed notifications
+    "WATCHTOWER_POLL_INTERVAL=86400",          # Check for updates once a day (in seconds)
+    "WATCHTOWER_TIMEOUT=60s",                  # Timeout for container operations
+    "WATCHTOWER_ROLLING_RESTART=true",         # Restart containers one by one
+    "DOCKER_HOST=tcp://socket-proxy:2375",     # Connect to Docker via the socket proxy
+  ]
+
+  volumes {
+    volume_name    = docker_volume.watchtower_config.name
+    container_path = "/config"
+  }
+
+  networks_advanced {
+    name = docker_network.traefik_net.name
+  }
+
+  # Watchtower doesn't have a web UI by default
+  labels {
+    label = "traefik.enable"
+    value = "false"
+  }
+
+  depends_on = [docker_container.socket_proxy]
+}
+
+
+# WhatSup Docker container
+resource "docker_container" "whatsup_docker" {
+  name  = "whatsup_docker"
+  image = "fmartinou/whats-up-docker:latest"
+  restart = "unless-stopped"
+
+  env = [
+    "TZ=${var.timezone}",
+    "WUD_WATCHER_DOCKER_HOST=socket-proxy",
+    "WUD_WATCHER_DOCKER_PORT=2375",
+    "WUD_WATCHER_DOCKER_SOCKET=tcp://socket-proxy",
+    "WUD_UI_HOST=0.0.0.0",
+    "WUD_UI_PORT=3000",
+    "WUD_TRIGGER_WATCHTOWER=true",
+    "WUD_TRIGGER_WATCHTOWER_ARGS=--cleanup"
+  ]
+
+  ports {
+    internal = 3000
+    external = 3001  # Using 3001 to avoid conflict with homepage
+  }
+
+  volumes {
+    volume_name    = docker_volume.whatsup_docker_data.name
+    container_path = "/store"
+  }
+
+  networks_advanced {
+    name = docker_network.traefik_net.name
+  }
+
+  labels {
+    label = "traefik.enable"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.whatsup.rule"
+    value = "Host(`whatsup.${var.domain_name}`)"
+  }
+  labels {
+    label = "traefik.http.routers.whatsup.entrypoints"
+    value = "web"
+  }
+  labels {
+    label = "traefik.http.services.whatsup.loadbalancer.server.port"
+    value = "3000"
+  }
+
+  depends_on = [docker_container.socket_proxy, docker_container.watchtower]
+}
+
+
+# Create CoreDNS volume for configuration
+resource "docker_volume" "coredns_config" { name = "coredns_config" }
+
+# Set up CoreDNS configuration
+resource "null_resource" "coredns_config" {
+  connection {
+    type        = "ssh"
+    user        = var.ssh_user
+    host        = var.ssh_host
+    private_key = file(var.ssh_key_path)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /var/lib/docker/volumes/coredns_config/_data",
+
+      # Create the Corefile
+      "sudo cat > /tmp/Corefile << 'EOL'",
+      ".:53 {",
+      "    # Forward most requests to external DNS",
+      "    forward . 8.8.8.8 8.8.4.4 {",
+      "        policy random",
+      "        health_check 5s",
+      "    }",
+      "    # Enable DNS cache",
+      "    cache 30",
+      "    # Error logging",
+      "    errors",
+      "    # Health check endpoint",
+      "    health {",
+      "        lameduck 5s",
+      "    }",
+      "    # Enable prometheus metrics",
+      "    prometheus :9153",
+      "    # Load balance between A/AAAA replies",
+      "    loadbalance",
+      "}",
+      "",
+      "# Handle your custom domain",
+      "pavish.online:53 {",
+      "    hosts {",
+      "        ${var.ssh_host} *.pavish.online",
+      "        fallthrough",
+      "    }",
+      "    cache 30",
+      "    errors",
+      "}",
+      "EOL",
+      "sudo cp /tmp/Corefile /var/lib/docker/volumes/coredns_config/_data/",
+      "sudo chmod 644 /var/lib/docker/volumes/coredns_config/_data/Corefile",
+      "rm /tmp/Corefile"
+    ]
+  }
+}
+
+# CoreDNS container
+resource "docker_container" "coredns" {
+  name  = "coredns"
+  image = "coredns/coredns:latest"
+  restart = "unless-stopped"
+
+  ports {
+    internal = 53
+    external = 53
+    protocol = "udp"
+  }
+  ports {
+    internal = 53
+    external = 53
+    protocol = "tcp"
+  }
+  ports {
+    internal = 9153
+    external = 9153
+  }
+
+  volumes {
+    volume_name    = docker_volume.coredns_config.name
+    container_path = "/etc/coredns"
+  }
+
+  command = ["-conf", "/etc/coredns/Corefile"]
+
+  # Use host networking for proper DNS functionality
+  network_mode = "host"
+
+  # Healthcheck
+  healthcheck {
+    test         = ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    interval     = "10s"
+    timeout      = "5s"
+    start_period = "5s"
+    retries      = 3
+  }
+
+  depends_on = [null_resource.coredns_config]
+}
+
+
 output "homelab_services" {
   value = {
-    plex          = "https://plex.${var.domain_name}"
     radarr        = "https://radarr.${var.domain_name}"
     sonarr        = "https://sonarr.${var.domain_name}"
     prowlarr      = "https://prowlarr.${var.domain_name}"
     qbittorrent   = "https://qbittorrent.${var.domain_name}"
     homeassistant = "https://homeassistant.${var.domain_name}"
     hyperhdr      = "Access via IP: ${var.ssh_host}:8090"
-    portainer     = "https://portainer.${var.domain_name}"
-    overseerr     = "https://overseerr.${var.domain_name}"
+    jellyseerr     = "https://jellyseerr.${var.domain_name}"
     jellyfin      = "https://jellyfin.${var.domain_name}"
+    whatsup       = "https://whatsup.${var.domain_name}"
   }
-}
-
-output "plex_claim_info" {
-  value = "Get your Plex claim token from https://plex.tv/claim (valid for 4 minutes after generation)"
 }

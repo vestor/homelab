@@ -1,0 +1,26 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/widgets
+
+- resources:
+    cpu: true
+    memory: true
+    disk: true
+    diskio: true
+    network: true
+    load: true
+
+- search:
+    provider: duckduckgo
+    target: _blank
+
+- system:
+    disk:
+      - mount: /
+        name: Root
+      - mount: "${mergerfs_mount_path}"
+        name: Storage
+
+- docker:
+    host: {{HOMEPAGE_VAR_DOCKER_SOCKET}}://{{HOMEPAGE_VAR_DOCKER_HOST}}:{{HOMEPAGE_VAR_DOCKER_PORT}}
+    status: true

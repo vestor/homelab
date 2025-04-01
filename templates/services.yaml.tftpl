@@ -1,0 +1,74 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/services
+
+- name: Media
+  icon: mdi-play-circle
+  services:
+    - name: Jellyfin
+      icon: jellyfin
+      href: http://homelab:8096
+      ping: jellyfin:8096
+      description: Media Server
+    - name: Jellyseerr
+      icon: overseerr
+      href: http://homelab:5055
+      ping: jellyseerr:5055
+      description: Media Requests
+
+- name: Media Management
+  icon: mdi-download-box
+  services:
+    - name: Sonarr
+      icon: sonarr
+      href: http://homelab:8989
+      ping: sonarr:8989
+      description: TV Shows Management
+    - name: Radarr
+      icon: radarr
+      href: http://homelab:7878
+      ping: radarr:7878
+      description: Movies Management
+    - name: Bazarr
+      icon: mdi-message-text
+      href: http://homelab:6767
+      ping: bazarr:6767
+      description: Subtitle Management
+    - name: Prowlarr
+      icon: prowlarr
+      href: http://homelab:9696
+      ping: prowlarr:9696
+      description: Indexer Management
+    - name: qBittorrent
+      icon: qbittorrent
+      href: http://homelab:8099
+      ping: qbittorrent:8099
+      description: Download Client
+
+- name: Home Automation
+  icon: mdi-home-automation
+  services:
+    - name: Home Assistant
+      icon: home-assistant
+      href: http://homelab:8123
+      ping: homeassistant:8123
+      description: Home Automation
+    - name: HyperHDR
+      icon: mdi-television-ambient-light
+      href: http://homelab:8090
+      ping: homelab:8090
+      description: Ambient Lighting
+
+- name: Management
+  icon: mdi-cog
+  services:
+    - name: Traefik
+      icon: traefik
+      href: http://homelab:8080
+      ping: traefik:8080
+      description: Reverse Proxy
+    - name: What's Up Docker
+      icon: docker
+      href: http://homelab:3001
+      ping: whatsup_docker:3000
+      description: Container Updates
