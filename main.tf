@@ -4,6 +4,10 @@ terraform {
       source  = "kreuzwerker/docker"
       version = "~> 3.0.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "4.35.0"
+    }
   }
 }
 
@@ -69,6 +73,22 @@ variable "cloudflare_email" {
   type        = string
 }
 
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID for the domain"
+  type        = string
+  sensitive = true
+}
+
+variable "tailscale_ip" {
+  description = "IP of the Tailscale homelab node"
+  type        = string
+  sensitive = true
+}
+
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
 
 # Configure the Docker provider to use SSH
 provider "docker" {
@@ -275,7 +295,6 @@ resource "null_resource" "traefik_config" {
       "    address: ':443'",
       "  tailscale:",
       "    address: ':8443'",
-      "",
       "providers:",
       "  docker:",
       "    endpoint: 'tcp://socket-proxy:2375'",
@@ -283,11 +302,9 @@ resource "null_resource" "traefik_config" {
       "    network: traefik_net",
       "    swarmMode: false",
       "    watch: true",
-      "",
       "api:",
       "  dashboard: true",
       "  insecure: true",
-      "",
       "certificatesResolvers:",
       "  cloudflare:",
       "    acme:",
@@ -298,7 +315,6 @@ resource "null_resource" "traefik_config" {
       "        resolvers:",
       "          - '1.1.1.1:53'",
       "          - '1.0.0.1:53'",
-      "",
       "log:",
       "  level: 'INFO'",
       "EOL",
@@ -316,7 +332,6 @@ resource "null_resource" "traefik_config" {
       "          - '192.168.0.0/16'     # Local LAN traffic",
       "          - '10.0.0.0/8'         # Tailscale IP range",
       "          - '100.64.0.0/10'      # Tailscale IP range (CGNAT)",
-      "",
       "    local-ip-whitelist:",
       "      ipWhiteList:",
       "        sourceRange:",
@@ -354,7 +369,7 @@ resource "docker_container" "traefik" {
   }
   ports {
     internal = 8080
-    external = 8080
+    external = 8081
   }
   ports {
     internal = 8443
@@ -363,7 +378,7 @@ resource "docker_container" "traefik" {
 
   env = [
     "CF_API_EMAIL=${var.cloudflare_email}",
-    "CF_API_KEY=${var.cloudflare_api_token}",
+    "CF_DNS_API_TOKEN=${var.cloudflare_api_token}",
     "CF_ZONE_API_TOKEN=${var.cloudflare_api_token}",
     "TZ=${var.timezone}"
   ]
@@ -454,12 +469,16 @@ resource "docker_container" "radarr" {
   }
   labels {
     label = "traefik.http.routers.radarr.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.radarr.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.radarr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.radarr.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.radarr.loadbalancer.server.port"
     value = "7878"
@@ -511,12 +530,16 @@ resource "docker_container" "sonarr" {
   }
   labels {
     label = "traefik.http.routers.sonarr.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.sonarr.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.sonarr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.sonarr.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.sonarr.loadbalancer.server.port"
     value = "8989"
@@ -564,12 +587,16 @@ resource "docker_container" "prowlarr" {
   }
   labels {
     label = "traefik.http.routers.prowlarr.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.prowlarr.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.prowlarr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.prowlarr.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.prowlarr.loadbalancer.server.port"
     value = "9696"
@@ -621,12 +648,16 @@ resource "docker_container" "bazarr" {
   }
   labels {
     label = "traefik.http.routers.bazarr.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.bazarr.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.bazarr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.bazarr.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.bazarr.loadbalancer.server.port"
     value = "6767"
@@ -689,12 +720,16 @@ resource "docker_container" "qbittorrent" {
   }
   labels {
     label = "traefik.http.routers.qbittorrent.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.qbittorrent.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.qbittorrent.tls"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.qbittorrent.tls.certresolver"
+    value = "cloudflare"
+  }
   labels {
     label = "traefik.http.services.qbittorrent.loadbalancer.server.port"
     value = "8099"
@@ -737,12 +772,16 @@ resource "docker_container" "homeassistant" {
   }
   labels {
     label = "traefik.http.routers.homeassistant.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.homeassistant.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.homeassistant.tls"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.homeassistant.tls.certresolver"
+    value = "cloudflare"
+  }
   labels {
     label = "traefik.http.services.homeassistant.loadbalancer.server.port"
     value = "8123"
@@ -808,11 +847,56 @@ resource "docker_container" "hyperhdr" {
   image = "custom-hyperhdr:latest"
   restart = "unless-stopped"
   privileged = true
-  network_mode = "host"
 
   volumes {
     volume_name    = docker_volume.hyperhdr_config.name
     container_path = "/config"
+  }
+
+  ports {
+    internal = 19400
+    external = 19400
+  }
+  ports {
+    internal = 19444
+    external = 19444
+  }
+  ports {
+    internal = 19445
+    external = 19445
+  }
+  ports {
+    internal = 8090
+    external = 8090
+  }
+  ports {
+    internal = 8092
+    external = 8092
+  }
+
+  labels {
+    label = "traefik.enable"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.hyperhdr.rule"
+    value = "Host(`hyperhdr.${var.domain_name}`)"
+  }
+  labels {
+    label = "traefik.http.routers.hyperhdr.entrypoints"
+    value = "web,websecure"
+  }
+  labels {
+    label = "traefik.http.routers.hyperhdr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.hyperhdr.tls"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.services.hyperhdr.loadbalancer.server.port"
+    value = "8090"
   }
 
   depends_on = [null_resource.build_hyperhdr_image]
@@ -859,12 +943,16 @@ resource "docker_container" "jellyseerr" {
   }
   labels {
     label = "traefik.http.routers.jellyseerr.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.jellyseerr.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.jellyseerr.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.jellyseerr.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.jellyseerr.loadbalancer.server.port"
     value = "5055"
@@ -935,19 +1023,31 @@ resource "docker_container" "jellyfin" {
   }
   labels {
     label = "traefik.http.routers.jellyfin.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # Uncomment if you enable HTTPS with Traefik
-  # labels {
-  #   label = "traefik.http.routers.jellyfin.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.jellyfin.tls"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.jellyfin.tls.certresolver"
+    value = "cloudflare"
+  }
   labels {
     label = "traefik.http.services.jellyfin.loadbalancer.server.port"
     value = "8096"
   }
 
   depends_on = [docker_container.mergerfs, docker_network.media_net]
+}
+
+resource "cloudflare_record" "homelab" {
+  zone_id = var.cloudflare_zone_id
+  name    = "*"
+  value   = var.tailscale_ip
+  type    = "A"
+  ttl     = 1 # Auto (using Cloudflare proxy)
+  proxied = false
 }
 
 # Homepage container
@@ -995,12 +1095,16 @@ resource "docker_container" "homepage" {
   }
   labels {
     label = "traefik.http.routers.homepage.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
-  # labels {
-  #   label = "traefik.http.routers.homepage.tls"
-  #   value = "true"
-  # }
+  labels {
+    label = "traefik.http.routers.homepage.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.routers.homepage.tls"
+    value = "true"
+  }
   labels {
     label = "traefik.http.services.homepage.loadbalancer.server.port"
     value = "3000"
@@ -1150,8 +1254,17 @@ resource "docker_container" "whatsup_docker" {
   }
   labels {
     label = "traefik.http.routers.whatsup.entrypoints"
-    value = "web"
+    value = "web,websecure"
   }
+  labels {
+      label = "traefik.http.routers.whatsup.tls.certresolver"
+      value = "cloudflare"
+  }
+  labels {
+      label = "traefik.http.routers.whatsup.tls"
+      value = "true"
+  }
+
   labels {
     label = "traefik.http.services.whatsup.loadbalancer.server.port"
     value = "3000"
@@ -1160,6 +1273,42 @@ resource "docker_container" "whatsup_docker" {
   depends_on = [docker_container.socket_proxy, docker_container.watchtower]
 }
 
+resource "null_resource" "disable_systemd_resolved" {
+  connection {
+    type        = "ssh"
+    user        = var.ssh_user
+    host        = var.ssh_host
+    private_key = file(var.ssh_key_path)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      # Stop and disable systemd-resolved
+      "sudo systemctl stop systemd-resolved || echo 'Failed to stop systemd-resolved'",
+      "sudo systemctl disable systemd-resolved || echo 'Failed to disable systemd-resolved'",
+
+      # Create a backup of the current resolv.conf
+      "sudo cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d%H%M%S) || echo 'No backup created'",
+
+      # Set up a basic resolv.conf with Google DNS
+      "sudo rm -f /etc/resolv.conf || echo 'Failed to remove resolv.conf'",
+      "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf > /dev/null",
+      "echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf > /dev/null",
+
+      # Verify the changes
+      "echo 'Current resolv.conf:'",
+      "cat /etc/resolv.conf",
+
+      # Ensure systemd doesn't recreate resolv.conf
+      "if [ -d /etc/systemd/resolved.conf.d ]; then",
+      "  echo 'DNSStubListener=no' | sudo tee /etc/systemd/resolved.conf.d/disable-stub-listener.conf > /dev/null || echo 'Could not create configuration'",
+      "fi",
+
+      # Verify systemd-resolved is stopped
+      "systemctl status systemd-resolved --no-pager || echo 'systemd-resolved is not running'"
+    ]
+  }
+}
 
 # Create CoreDNS volume for configuration
 resource "docker_volume" "coredns_config" { name = "coredns_config" }
@@ -1177,7 +1326,7 @@ resource "null_resource" "coredns_config" {
     inline = [
       "sudo mkdir -p /var/lib/docker/volumes/coredns_config/_data",
 
-      # Create the Corefile
+      # Create the Corefile with admin interface disabled
       "sudo cat > /tmp/Corefile << 'EOL'",
       ".:53 {",
       "    # Forward most requests to external DNS",
@@ -1189,22 +1338,20 @@ resource "null_resource" "coredns_config" {
       "    cache 30",
       "    # Error logging",
       "    errors",
-      "    # Health check endpoint",
-      "    health {",
-      "        lameduck 5s",
-      "    }",
       "    # Enable prometheus metrics",
       "    prometheus :9153",
       "    # Load balance between A/AAAA replies",
       "    loadbalance",
       "}",
-      "",
       "# Handle your custom domain",
-      "pavish.online:53 {",
+      "${var.domain_name}:53 {",
       "    hosts {",
-      "        ${var.ssh_host} *.pavish.online",
+      "        ${var.ssh_host} *.${var.domain_name}",
       "        fallthrough",
       "    }",
+      "    # Important: Forward queries that hosts plugin doesn't answer",
+      "    forward . 8.8.8.8 8.8.4.4",
+      "    # Enable DNS cache",
       "    cache 30",
       "    errors",
       "}",
@@ -1216,12 +1363,13 @@ resource "null_resource" "coredns_config" {
   }
 }
 
-# CoreDNS container
+# Update the CoreDNS container to use a different health check method
 resource "docker_container" "coredns" {
   name  = "coredns"
   image = "coredns/coredns:latest"
   restart = "unless-stopped"
 
+  # Since we're using host networking, port mappings are for documentation only
   ports {
     internal = 53
     external = 53
@@ -1242,21 +1390,34 @@ resource "docker_container" "coredns" {
     container_path = "/etc/coredns"
   }
 
-  command = ["-conf", "/etc/coredns/Corefile"]
+  # Add critical environment variables to disable default admin interface
+  env = [
+    "GODEBUG=netdns=go",   # Use Go's DNS resolver
+    "CORES=0",             # Use all available cores
+    # Add any other needed environment variables
+  ]
+
+  # Explicitly disable the built-in admin interface with command-line flags
+  command = [
+    "-conf",
+    "/etc/coredns/Corefile",
+    "-dns.port",
+    "53"
+  ]
 
   # Use host networking for proper DNS functionality
   network_mode = "host"
 
-  # Healthcheck
+  # Change healthcheck to use DNS functionality instead of HTTP
   healthcheck {
-    test         = ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    test         = ["CMD", "dig", "@127.0.0.1", "-p", "53", "localhost"]
     interval     = "10s"
     timeout      = "5s"
     start_period = "5s"
     retries      = 3
   }
 
-  depends_on = [null_resource.coredns_config]
+  depends_on = [null_resource.coredns_config, null_resource.disable_systemd_resolved]
 }
 
 
@@ -1267,8 +1428,8 @@ output "homelab_services" {
     prowlarr      = "https://prowlarr.${var.domain_name}"
     qbittorrent   = "https://qbittorrent.${var.domain_name}"
     homeassistant = "https://homeassistant.${var.domain_name}"
-    hyperhdr      = "Access via IP: ${var.ssh_host}:8090"
-    jellyseerr     = "https://jellyseerr.${var.domain_name}"
+    hyperhdr      = "https://hyperhdr.${var.domain_name}"
+    jellyseerr    = "https://jellyseerr.${var.domain_name}"
     jellyfin      = "https://jellyfin.${var.domain_name}"
     whatsup       = "https://whatsup.${var.domain_name}"
   }
