@@ -38,5 +38,5 @@ This repository contains Terraform configurations to deploy and manage a compreh
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/homelab-infrastructure.git
-   cd homelab-infrastructure
+   git clone https://github.com/vestor/homelab.git
+   cd homelab
