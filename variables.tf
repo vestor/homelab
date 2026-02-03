@@ -72,3 +72,39 @@ variable "cloudflare_zone_id" {
   type        = string
   sensitive   = true
 }
+
+variable "public_ip" {
+  description = "Public IP address of the CoreOS machine"
+  type        = string
+}
+
+# Palworld Server Variables
+variable "palworld_server_password" {
+  description = "Palworld server password"
+  type        = string
+  sensitive   = true
+}
+
+variable "palworld_admin_password" {
+  description = "Palworld admin password for RCON"
+  type        = string
+  sensitive   = true
+}
+
+variable "palworld_player_count" {
+  description = "Maximum number of players allowed on the Palworld server"
+  type        = number
+  default     = 10
+}
+
+variable "palworld_server_name" {
+  description = "Name of the Palworld server"
+  type        = string
+  default     = "Cyberstaan"
+}
+
+variable "palworld_server_description" {
+  description = "Description of the Palworld server"
+  type        = string
+  default     = "Welcome to Cyberstaan"
+}

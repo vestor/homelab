@@ -2,7 +2,7 @@ terraform {
   required_providers {
     docker = {
       source  = "kreuzwerker/docker"
-      version = "3.0.2"
+      version = "~> 3.5"
     }
   }
 }
@@ -30,7 +30,10 @@ resource "docker_volume" "volumes" {
     "traefik_config", "traefik_acme", "tailscale_data",
 
     # Dashboards and management
-    "homepage_config", "watchtower_config", "whatsup_docker_data"
+    "homepage_config", "watchtower_config", "whatsup_docker_data",
+
+    # Gaming
+    "palworld_config"
   ])
 
   name = each.key

@@ -103,3 +103,9 @@ output "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   value       = docker_volume.volumes["whatsup_docker_data"].name
 }
+
+# Volume outputs - for gaming
+output "palworld_config_vol" {
+  description = "Docker volume for Palworld configuration"
+  value       = docker_volume.volumes["palworld_config"].name
+}

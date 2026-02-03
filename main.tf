@@ -2,7 +2,7 @@ terraform {
   required_providers {
     docker = {
       source  = "kreuzwerker/docker"
-      version = "~> 3.0.2"
+      version = "~> 3.5"
     }
     cloudflare = {
       source  = "cloudflare/cloudflare"
@@ -150,4 +150,23 @@ module "dashboard" {
     module.core,
     module.networking
   ]
+}
+
+# Gaming servers
+module "gaming" {
+  source = "./modules/gaming"
+
+  domain_name         = var.domain_name
+  timezone            = var.timezone
+
+  traefik_network_id         = module.core.traefik_network_id
+  palworld_config_vol        = module.core.palworld_config_vol
+  palworld_server_password   = var.palworld_server_password
+  palworld_admin_password    = var.palworld_admin_password
+  palworld_player_count      = var.palworld_player_count
+  palworld_server_name       = var.palworld_server_name
+  palworld_server_description = var.palworld_server_description
+  public_ip                  = var.public_ip
+
+  depends_on = [module.core]
 }
