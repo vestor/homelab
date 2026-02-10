@@ -153,7 +153,7 @@ resource "docker_container" "tailscale" {
   env = [
     "TS_AUTH_KEY=${var.tailscale_auth_key}",
     "TS_STATE_DIR=/var/lib/tailscale",
-    "TS_EXTRA_ARGS=--hostname=homelab"
+    "TS_EXTRA_ARGS=--hostname=homelab --advertise-tags=tag:homelab"
   ]
 
   volumes {
