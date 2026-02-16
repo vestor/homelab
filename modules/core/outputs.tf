@@ -94,11 +94,6 @@ output "homepage_config_vol" {
   value       = docker_volume.volumes["homepage_config"].name
 }
 
-output "watchtower_config_vol" {
-  description = "Docker volume for Watchtower configuration"
-  value       = docker_volume.volumes["watchtower_config"].name
-}
-
 output "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   value       = docker_volume.volumes["whatsup_docker_data"].name

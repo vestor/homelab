@@ -30,7 +30,7 @@ resource "docker_volume" "volumes" {
     "traefik_config", "traefik_acme", "tailscale_data",
 
     # Dashboards and management
-    "homepage_config", "watchtower_config", "whatsup_docker_data",
+    "homepage_config", "whatsup_docker_data",
 
     # Gaming
     "palworld_config"

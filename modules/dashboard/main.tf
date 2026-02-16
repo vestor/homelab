@@ -1,4 +1,4 @@
-# Dashboards module - Homepage, WhatSup Docker, Watchtower
+# Dashboards module - Homepage, What's Up Docker
 
 # Copy config files for Homepage to the remote server
 resource "null_resource" "homepage_config_files" {
@@ -94,35 +94,6 @@ module "homepage" {
   ]
 }
 
-# Watchtower - automatic container updates
-module "watchtower" {
-  source = "../service_template"
-
-  service_name  = "watchtower"
-  image         = "containrrr/watchtower:latest"
-  domain_name   = var.domain_name
-  timezone      = var.timezone
-  network_ids   = [var.traefik_network_id]
-  enable_traefik = false
-
-  custom_env = [
-    "WATCHTOWER_CLEANUP=true",                 # Remove old images
-    "WATCHTOWER_INCLUDE_STOPPED=false",        # Only update running containers
-    "WATCHTOWER_NOTIFICATION_REPORT=true",     # More detailed notifications
-    "WATCHTOWER_POLL_INTERVAL=86400",          # Check for updates once a day (in seconds)
-    "WATCHTOWER_TIMEOUT=60s",                  # Timeout for container operations
-    "WATCHTOWER_ROLLING_RESTART=true",         # Restart containers one by one
-    "DOCKER_HOST=tcp://${var.socket_proxy_name}:2375"  # Connect to Docker via the socket proxy
-  ]
-
-  volume_mappings = [
-    {
-      volume_name    = var.watchtower_config_vol
-      container_path = "/config"
-    }
-  ]
-}
-
 # What's Up Docker - container update monitoring
 module "whatsup_docker" {
   source = "../service_template"
@@ -146,9 +117,7 @@ module "whatsup_docker" {
     "WUD_WATCHER_DOCKER_PORT=2375",
     "WUD_WATCHER_DOCKER_SOCKET=tcp://${var.socket_proxy_name}",
     "WUD_UI_HOST=0.0.0.0",
-    "WUD_UI_PORT=3000",
-    "WUD_TRIGGER_WATCHTOWER=true",
-    "WUD_TRIGGER_WATCHTOWER_ARGS=--cleanup"
+    "WUD_UI_PORT=3000"
   ]
 
   volume_mappings = [
@@ -166,5 +135,4 @@ module "whatsup_docker" {
     "homepage.description" = "Docker Update Monitor"
   }
 
-  depends_on = [module.watchtower]
 }

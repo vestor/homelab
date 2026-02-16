@@ -12,7 +12,6 @@ output "container_names" {
   description = "Names of deployed dashboard containers"
   value = {
     homepage   = module.homepage.container_name
-    watchtower = module.watchtower.container_name
     whatsup    = module.whatsup_docker.container_name
   }
 }

@@ -143,7 +143,6 @@ module "dashboard" {
   socket_proxy_name   = module.core.socket_proxy_name
 
   homepage_config_vol     = module.core.homepage_config_vol
-  watchtower_config_vol   = module.core.watchtower_config_vol
   whatsup_docker_data_vol = module.core.whatsup_docker_data_vol
 
   depends_on = [

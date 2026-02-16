@@ -42,7 +42,6 @@ resource "null_resource" "traefik_config" {
       "    endpoint: 'tcp://${var.socket_proxy_name}:2375'",
       "    exposedByDefault: false",
       "    network: traefik_net",
-      "    swarmMode: false",
       "    watch: true",
       "api:",
       "  dashboard: true",
@@ -68,14 +67,14 @@ resource "null_resource" "traefik_config" {
       "http:",
       "  middlewares:",
       "    tailscale-ip-whitelist:",
-      "      ipWhiteList:",
+      "      ipAllowList:",
       "        sourceRange:",
       "          - '127.0.0.1/32'       # Local traffic",
       "          - '192.168.0.0/16'     # Local LAN traffic",
       "          - '10.0.0.0/8'         # Tailscale IP range",
       "          - '100.64.0.0/10'      # Tailscale IP range (CGNAT)",
       "    local-ip-whitelist:",
-      "      ipWhiteList:",
+      "      ipAllowList:",
       "        sourceRange:",
       "          - '127.0.0.1/32'       # Local traffic",
       "          - '192.168.0.0/16'     # Local LAN traffic",
@@ -91,7 +90,7 @@ resource "null_resource" "traefik_config" {
 # Update the Traefik container with HTTPS support and Cloudflare DNS
 resource "docker_container" "traefik" {
   name  = "traefik"
-  image = "traefik:v2.10"
+  image = "traefik:v3.6"
   restart = "unless-stopped"
   user = "0:0"
 
@@ -209,9 +208,10 @@ resource "null_resource" "disable_systemd_resolved" {
 
   provisioner "remote-exec" {
     inline = [
-      # Stop and disable systemd-resolved
-      "sudo systemctl stop systemd-resolved || echo 'Failed to stop systemd-resolved'",
-      "sudo systemctl disable systemd-resolved || echo 'Failed to disable systemd-resolved'",
+      # Stop and disable systemd-resolved and its trigger sockets
+      "sudo systemctl stop systemd-resolved systemd-resolved-monitor.socket systemd-resolved-varlink.socket || echo 'Failed to stop systemd-resolved'",
+      "sudo systemctl disable systemd-resolved systemd-resolved-monitor.socket systemd-resolved-varlink.socket || echo 'Failed to disable systemd-resolved'",
+      "sudo systemctl mask systemd-resolved systemd-resolved-monitor.socket systemd-resolved-varlink.socket || echo 'Failed to mask systemd-resolved'",
 
       # Create a backup of the current resolv.conf
       "sudo cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d%H%M%S) || echo 'No backup created'",

@@ -48,11 +48,6 @@ variable "homepage_config_vol" {
   type        = string
 }
 
-variable "watchtower_config_vol" {
-  description = "Docker volume for Watchtower configuration"
-  type        = string
-}
-
 variable "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   type        = string
