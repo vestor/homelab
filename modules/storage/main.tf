@@ -100,9 +100,9 @@ resource "docker_container" "mergerfs" {
   network_mode = "host"
 
   # Add security options for FUSE
-  security_opts = ["apparmor:unconfined"]
+  security_opts = ["label=disable", "apparmor:unconfined"]
   capabilities {
-    add = ["SYS_ADMIN"]
+    add = ["CAP_SYS_ADMIN"]
   }
 
   depends_on = [null_resource.setup_disk_mounts]

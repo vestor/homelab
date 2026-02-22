@@ -1,0 +1,160 @@
+server:
+  port: 8080
+  proxied: true
+
+theme:
+  background-color: 240 10 8
+  primary-color: 40 60 55
+  positive-color: 120 50 55
+  negative-color: 0 60 55
+
+pages:
+  - name: Home
+    columns:
+      - size: small
+        widgets:
+          - type: search
+            search-engine: google
+            autofocus: true
+
+          - type: clock
+            hour-format: 24h
+            timezones:
+              - timezone: Asia/Kolkata
+                label: Home
+
+          - type: weather
+            location: Bengaluru, India
+            units: metric
+            hour-format: 24h
+
+          - type: bookmarks
+            groups:
+              - title: Media
+                color: 40 60 55
+                links:
+                  - title: Jellyfin
+                    url: https://jellyfin.${domain_name}
+                  - title: Seerr
+                    url: https://seerr.${domain_name}
+
+              - title: Media Management
+                color: 270 40 60
+                links:
+                  - title: Sonarr
+                    url: https://sonarr.${domain_name}
+                  - title: Radarr
+                    url: https://radarr.${domain_name}
+                  - title: Bazarr
+                    url: https://bazarr.${domain_name}
+                  - title: Prowlarr
+                    url: https://prowlarr.${domain_name}
+                  - title: qBittorrent
+                    url: https://qbittorrent.${domain_name}
+
+              - title: Home Automation
+                color: 200 50 60
+                links:
+                  - title: Home Assistant
+                    url: https://homeassistant.${domain_name}
+                  - title: HyperHDR
+                    url: https://hyperhdr.${domain_name}
+
+              - title: Infrastructure
+                color: 150 45 55
+                links:
+                  - title: Traefik
+                    url: https://traefik.${domain_name}
+                  - title: Homepage
+                    url: https://homepage.${domain_name}
+                  - title: What's Up Docker
+                    url: https://whatsup.${domain_name}
+
+              - title: Gaming
+                color: 0 55 60
+                links:
+                  - title: Palworld
+                    url: https://palworld.${domain_name}
+                  - title: Pal Editor
+                    url: https://paledit.${domain_name}
+
+      - size: full
+        widgets:
+          - type: iframe
+            source: https://toggle.${domain_name}
+            height: 200
+
+          - type: server-stats
+            servers:
+              - type: local
+                name: Homelab
+                hide-mountpoints-by-default: true
+                mountpoints:
+                  /host/sysroot:
+                    name: System
+                    hide: false
+                  ${mergerfs_mount_path}:
+                    name: Storage
+                    hide: false
+
+          - type: monitor
+            cache: 1m
+            title: Service Health
+            sites:
+              - title: Jellyfin
+                url: http://jellyfin:8096
+                icon: si:jellyfin
+              - title: Sonarr
+                url: http://sonarr:8989
+                icon: si:sonarr
+              - title: Radarr
+                url: http://radarr:7878
+                icon: si:radarr
+              - title: Prowlarr
+                url: http://prowlarr:9696
+                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/prowlarr.svg
+              - title: qBittorrent
+                url: http://qbittorrent:8099
+                icon: si:qbittorrent
+              - title: Seerr
+                url: http://seerr:5055
+                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/overseerr.svg
+              - title: Bazarr
+                url: http://bazarr:6767
+                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/bazarr.svg
+              - title: Home Assistant
+                url: http://homeassistant:8123
+                icon: si:homeassistant
+              - title: Traefik
+                url: http://traefik:8080
+                icon: si:traefikproxy
+
+          - type: docker-containers
+            socket-path: /var/run/docker.sock
+
+          - type: releases
+            repositories:
+              - jellyfin/jellyfin
+              - Radarr/Radarr
+              - Sonarr/Sonarr
+              - Prowlarr/Prowlarr
+              - sct/overseerr
+              - home-assistant/core
+              - traefik/traefik
+              - glanceapp/glance
+
+      - size: small
+        widgets:
+          - type: rss
+            title: r/selfhosted
+            limit: 15
+            collapse-after: 5
+            feeds:
+              - url: https://www.reddit.com/r/selfhosted/.rss
+
+          - type: rss
+            title: Hacker News
+            limit: 15
+            collapse-after: 5
+            feeds:
+              - url: https://hnrss.org/frontpage

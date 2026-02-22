@@ -260,15 +260,16 @@ module "bazarr" {
   }
 }
 
-# Jellyseerr - Media request management
-module "jellyseerr" {
+# Seerr - Media request management
+module "seerr" {
   source = "../service_template"
 
-  service_name  = "jellyseerr"
-  image         = "ghcr.io/fallenbagel/jellyseerr:latest"
+  service_name  = "seerr"
+  image         = "ghcr.io/seerr-team/seerr:latest"
   domain_name   = var.domain_name
   timezone      = var.timezone
   network_ids   = local.networks
+  init          = true
 
   web_port     = 5055
   port_mappings = [
@@ -280,16 +281,16 @@ module "jellyseerr" {
 
   volume_mappings = [
     {
-      volume_name    = var.jellyseerr_config_vol
+      volume_name    = var.seerr_config_vol
       container_path = "/app/config"
     }
   ]
 
   custom_labels = {
     "homepage.group"       = "Media Management"
-    "homepage.name"        = "Jellyseerr"
-    "homepage.icon"        = "jellyseerr.png"
-    "homepage.href"        = "https://jellyseerr.${var.domain_name}"
+    "homepage.name"        = "Seerr"
+    "homepage.icon"        = "overseerr.png"
+    "homepage.href"        = "https://seerr.${var.domain_name}"
     "homepage.description" = "Media Requests"
   }
 }

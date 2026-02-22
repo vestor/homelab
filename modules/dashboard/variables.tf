@@ -52,3 +52,8 @@ variable "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   type        = string
 }
+
+variable "glance_config_vol" {
+  description = "Docker volume for Glance configuration"
+  type        = string
+}

@@ -59,6 +59,7 @@ module "networking" {
   ssh_user            = var.ssh_user
   ssh_key_path        = var.ssh_key_path
   domain_name         = var.domain_name
+  local_ip            = var.local_ip
   timezone            = var.timezone
   tailscale_auth_key  = var.tailscale_auth_key
   cloudflare_api_token = var.cloudflare_api_token
@@ -96,7 +97,7 @@ module "media" {
   jellyfin_config_vol   = module.core.jellyfin_config_vol
   jellyfin_cache_vol    = module.core.jellyfin_cache_vol
   bazarr_config_vol     = module.core.bazarr_config_vol
-  jellyseerr_config_vol = module.core.jellyseerr_config_vol
+  seerr_config_vol = module.core.seerr_config_vol
   byparr_config_vol = module.core.byparr_config_vol
 
 
@@ -144,6 +145,7 @@ module "dashboard" {
 
   homepage_config_vol     = module.core.homepage_config_vol
   whatsup_docker_data_vol = module.core.whatsup_docker_data_vol
+  glance_config_vol       = module.core.glance_config_vol
 
   depends_on = [
     module.core,
@@ -155,17 +157,22 @@ module "dashboard" {
 module "gaming" {
   source = "./modules/gaming"
 
+  ssh_host            = var.ssh_host
+  ssh_user            = var.ssh_user
+  ssh_key_path        = var.ssh_key_path
   domain_name         = var.domain_name
   timezone            = var.timezone
 
   traefik_network_id         = module.core.traefik_network_id
   palworld_config_vol        = module.core.palworld_config_vol
+  palworld_toggle_data_vol   = module.core.palworld_toggle_data_vol
   palworld_server_password   = var.palworld_server_password
   palworld_admin_password    = var.palworld_admin_password
   palworld_player_count      = var.palworld_player_count
   palworld_server_name       = var.palworld_server_name
   palworld_server_description = var.palworld_server_description
   public_ip                  = var.public_ip
+  paledit_password           = var.paledit_password
 
   depends_on = [module.core]
 }

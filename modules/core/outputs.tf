@@ -51,9 +51,9 @@ output "bazarr_config_vol" {
   value       = docker_volume.volumes["bazarr_config"].name
 }
 
-output "jellyseerr_config_vol" {
-  description = "Docker volume for Jellyseerr configuration"
-  value       = docker_volume.volumes["jellyseerr_config"].name
+output "seerr_config_vol" {
+  description = "Docker volume for Seerr configuration"
+  value       = docker_volume.volumes["seerr_config"].name
 }
 
 output "byparr_config_vol" {
@@ -99,8 +99,18 @@ output "whatsup_docker_data_vol" {
   value       = docker_volume.volumes["whatsup_docker_data"].name
 }
 
+output "glance_config_vol" {
+  description = "Docker volume for Glance configuration"
+  value       = docker_volume.volumes["glance_config"].name
+}
+
 # Volume outputs - for gaming
 output "palworld_config_vol" {
   description = "Docker volume for Palworld configuration"
   value       = docker_volume.volumes["palworld_config"].name
+}
+
+output "palworld_toggle_data_vol" {
+  description = "Docker volume for Palworld toggle service data"
+  value       = docker_volume.volumes["palworld_toggle_data"].name
 }

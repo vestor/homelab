@@ -11,14 +11,16 @@ terraform {
 
 locals {
   # Default labels for Traefik if enabled
-  traefik_labels = var.enable_traefik ? {
+  traefik_labels = var.enable_traefik ? merge({
     "traefik.enable"                                              = "true"
     "traefik.http.routers.${var.service_name}.rule"              = "Host(`${var.service_name}.${var.domain_name}`)"
     "traefik.http.routers.${var.service_name}.entrypoints"       = "web,websecure"
     "traefik.http.routers.${var.service_name}.tls"               = "true"
     "traefik.http.routers.${var.service_name}.tls.certresolver"  = "cloudflare"
     "traefik.http.services.${var.service_name}.loadbalancer.server.port" = tostring(var.web_port)
-  } : {}
+  }, var.restrict_to_admins ? {
+    "traefik.http.routers.${var.service_name}.middlewares" = "admin-only@file"
+  } : {}) : {}
 
   # Merge default and custom labels
   merged_labels = { for k, v in merge(local.traefik_labels, var.custom_labels) : k => v }
@@ -46,6 +48,9 @@ resource "docker_container" "service" {
   restart    = var.restart_policy
   privileged = var.privileged
   user       = var.container_user
+  init       = var.init
+  must_run   = var.must_run
+  start      = var.start
 
   # Dynamic ports based on provided map
   dynamic "ports" {

@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Palworld / Pal Editor toggle service.
+
+A minimal HTTP server that lets you switch between the Palworld game server
+and the Pal Editor.  Communicates with the Docker daemon over the unix socket.
+"""
+
+import http.client
+import json
+import socket
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+DOCKER_SOCKET = "/var/run/docker.sock"
+PALWORLD_CONTAINER = "palworld"
+PALEDIT_CONTAINER = "paledit"
+
+
+class DockerSocketConnection(http.client.HTTPConnection):
+    """HTTPConnection subclass that talks to a unix socket."""
+
+    def __init__(self, path):
+        super().__init__("localhost")
+        self.path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(self.path)
+
+
+def docker_request(method, path, body=None):
+    conn = DockerSocketConnection(DOCKER_SOCKET)
+    headers = {"Content-Type": "application/json"} if body else {}
+    conn.request(method, path, body=body, headers=headers)
+    resp = conn.getresponse()
+    data = resp.read()
+    status = resp.status
+    conn.close()
+    return status, data
+
+
+def container_status(name):
+    """Return the container state (running/exited/…) or 'unknown'."""
+    status, data = docker_request("GET", f"/containers/{name}/json")
+    if status == 200:
+        info = json.loads(data)
+        return info.get("State", {}).get("Status", "unknown")
+    return "not found"
+
+
+def stop_container(name):
+    docker_request("POST", f"/containers/{name}/stop?t=30")
+    # Wait briefly for it to actually stop
+    for _ in range(15):
+        if container_status(name) != "running":
+            return
+        time.sleep(1)
+
+
+def start_container(name):
+    docker_request("POST", f"/containers/{name}/start")
+
+
+HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palworld Toggle</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: hsl(240 10% 8%);
+    color: hsl(0 0% 85%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+  }}
+  h2 {{
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: 1rem;
+    color: hsl(0 0% 70%);
+  }}
+  .status {{
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.85rem;
+  }}
+  .status span {{
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }}
+  .dot {{
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }}
+  .dot.running {{ background: hsl(120 50% 55%); }}
+  .dot.stopped {{ background: hsl(0 60% 55%); }}
+  .buttons {{
+    display: flex;
+    gap: 0.8rem;
+  }}
+  button {{
+    padding: 0.6rem 1.2rem;
+    border: 1px solid hsl(0 0% 25%);
+    border-radius: 6px;
+    background: hsl(240 8% 14%);
+    color: hsl(0 0% 85%);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }}
+  button:hover {{
+    background: hsl(240 8% 20%);
+  }}
+  button:disabled {{
+    opacity: 0.4;
+    cursor: not-allowed;
+  }}
+  button.active {{
+    border-color: hsl(120 40% 40%);
+    background: hsl(120 20% 15%);
+  }}
+</style>
+</head>
+<body>
+  <h2>Palworld Server Toggle</h2>
+  <div class="status">
+    <span><span class="dot {palworld_dot}"></span>Palworld: {palworld_status}</span>
+    <span><span class="dot {paledit_dot}"></span>Pal Editor: {paledit_status}</span>
+  </div>
+  <div class="buttons">
+    <form method="POST" action="/toggle/editor" style="display:inline">
+      <button type="submit" {editor_disabled}>Start Pal Editor</button>
+    </form>
+    <form method="POST" action="/toggle/server" style="display:inline">
+      <button type="submit" {server_disabled}>Start Palworld Server</button>
+    </form>
+  </div>
+</body>
+</html>
+"""
+
+
+class ToggleHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        if self.path != "/":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        pw_status = container_status(PALWORLD_CONTAINER)
+        pe_status = container_status(PALEDIT_CONTAINER)
+
+        pw_running = pw_status == "running"
+        pe_running = pe_status == "running"
+
+        html = HTML_TEMPLATE.format(
+            palworld_status=pw_status,
+            paledit_status=pe_status,
+            palworld_dot="running" if pw_running else "stopped",
+            paledit_dot="running" if pe_running else "stopped",
+            editor_disabled='class="active" disabled' if pe_running else "",
+            server_disabled='class="active" disabled' if pw_running else "",
+        )
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(html.encode())
+
+    def do_POST(self):
+        if self.path == "/toggle/editor":
+            stop_container(PALWORLD_CONTAINER)
+            start_container(PALEDIT_CONTAINER)
+        elif self.path == "/toggle/server":
+            stop_container(PALEDIT_CONTAINER)
+            start_container(PALWORLD_CONTAINER)
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(303)
+        self.send_header("Location", "/")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        print(f"[toggle] {args[0]}")
+
+
+if __name__ == "__main__":
+    server = HTTPServer(("0.0.0.0", 8090), ToggleHandler)
+    print("[toggle] Listening on :8090")
+    server.serve_forever()

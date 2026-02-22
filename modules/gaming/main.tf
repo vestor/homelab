@@ -12,6 +12,7 @@ module "palworld" {
   timezone      = var.timezone
   network_ids   = local.networks
   enable_traefik = false  # Game servers typically don't use HTTP
+  must_run      = false   # Managed by toggle service
 
   port_mappings = [
     {
@@ -64,7 +65,8 @@ module "palworld" {
     "BASE_CAMP_MAX_NUM_IN_GUILD=6",
     "PAL_SPAWN_NUM_RATE=3.0",
     "COLLECTION_DROP_RATE=3.0",
-    "ENEMY_DROP_ITEM_RATE=3.0"
+    "ENEMY_DROP_ITEM_RATE=3.0",
+    "ENABLE_INVADER_ENEMY=false"
   ]
 
   volume_mappings = [
@@ -79,5 +81,122 @@ module "palworld" {
     "homepage.name"        = "Palworld"
     "homepage.icon"        = "palworld.png"
     "homepage.description" = "Palworld Dedicated Server"
+  }
+}
+
+# Upload toggle script to Docker volume via SSH
+resource "null_resource" "toggle_script" {
+  connection {
+    type        = "ssh"
+    user        = var.ssh_user
+    host        = var.ssh_host
+    private_key = file(var.ssh_key_path)
+  }
+
+  triggers = {
+    script_sha1 = sha1(file("${path.root}/templates/palworld-toggle.py.tftpl"))
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "mkdir -p /tmp/toggle-config"
+    ]
+  }
+
+  provisioner "file" {
+    source      = "${path.root}/templates/palworld-toggle.py.tftpl"
+    destination = "/tmp/toggle-config/toggle.py"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /var/lib/docker/volumes/${var.palworld_toggle_data_vol}/_data",
+      "sudo cp /tmp/toggle-config/toggle.py /var/lib/docker/volumes/${var.palworld_toggle_data_vol}/_data/toggle.py",
+      "sudo chmod 755 /var/lib/docker/volumes/${var.palworld_toggle_data_vol}/_data/toggle.py",
+      "rm -rf /tmp/toggle-config"
+    ]
+  }
+}
+
+# Palworld Pal Editor - web-based save editor
+module "paledit" {
+  source = "../service_template"
+
+  service_name  = "paledit"
+  image         = "ghcr.io/kriscris/palworld-pal-editor:latest"
+  domain_name   = var.domain_name
+  timezone      = var.timezone
+  network_ids   = local.networks
+  must_run      = false  # Managed by toggle service
+  start         = false  # Starts stopped; toggle service starts it
+  restrict_to_admins = false
+
+  web_port     = 58888
+  port_mappings = [
+    {
+      internal = 58888
+      external = 8083
+    }
+  ]
+
+  custom_env = [
+    "MODE=web",
+    "PASSWORD=${var.paledit_password}",
+    "APP_PORT=58888",
+    "APP_LANG=en"
+  ]
+
+  volume_mappings = [
+    {
+      host_path      = "/var/lib/docker/volumes/${var.palworld_config_vol}/_data/Pal/Saved/SaveGames/0/${var.palworld_world_id}"
+      container_path = "/mnt/gamesave"
+    }
+  ]
+
+  custom_labels = {
+    "homepage.group"       = "Gaming"
+    "homepage.name"        = "Pal Editor"
+    "homepage.icon"        = "palworld.png"
+    "homepage.description" = "Palworld Save Editor"
+  }
+}
+
+# Toggle service - controls palworld/paledit switching
+module "palworld_toggle" {
+  source     = "../service_template"
+  depends_on = [null_resource.toggle_script]
+
+  service_name   = "palworld-toggle"
+  image          = "python:3-alpine"
+  domain_name    = var.domain_name
+  timezone       = var.timezone
+  network_ids    = local.networks
+  privileged     = true
+  container_user = "0:0"
+  command        = ["python", "/app/toggle.py"]
+  restrict_to_admins = false
+
+  web_port     = 8090
+  port_mappings = [
+    {
+      internal = 8090
+      external = 8084
+    }
+  ]
+
+  volume_mappings = [
+    {
+      volume_name    = var.palworld_toggle_data_vol
+      container_path = "/app"
+      read_only      = true
+    },
+    {
+      host_path      = "/var/run/docker.sock"
+      container_path = "/var/run/docker.sock"
+    }
+  ]
+
+  custom_labels = {
+    "traefik.http.routers.palworld-toggle.rule" = "Host(`toggle.${var.domain_name}`)"
   }
 }

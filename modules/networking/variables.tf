@@ -77,3 +77,8 @@ variable "cloudflare_zone_id" {
   type        = string
   sensitive   = true
 }
+
+variable "local_ip" {
+  description = "Local LAN IP address of the CoreOS machine"
+  type        = string
+}

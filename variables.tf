@@ -78,6 +78,11 @@ variable "public_ip" {
   type        = string
 }
 
+variable "local_ip" {
+  description = "Local LAN IP address of the CoreOS machine"
+  type        = string
+}
+
 # Palworld Server Variables
 variable "palworld_server_password" {
   description = "Palworld server password"
@@ -107,4 +112,10 @@ variable "palworld_server_description" {
   description = "Description of the Palworld server"
   type        = string
   default     = "Welcome to Cyberstaan"
+}
+
+variable "paledit_password" {
+  description = "Password for Palworld Pal Editor web UI"
+  type        = string
+  sensitive   = true
 }

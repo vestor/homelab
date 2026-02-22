@@ -8,7 +8,7 @@ output "media_service_urls" {
     qbittorrent = module.qbittorrent.service_url
     jellyfin    = module.jellyfin.service_url
     bazarr      = module.bazarr.service_url
-    jellyseerr  = module.jellyseerr.service_url
+    seerr       = module.seerr.service_url
     byparr      = module.byparr.service_url
 
   }
@@ -24,7 +24,7 @@ output "container_names" {
     qbittorrent = module.qbittorrent.container_name
     jellyfin    = module.jellyfin.container_name
     bazarr      = module.bazarr.container_name
-    jellyseerr  = module.jellyseerr.container_name
+    seerr       = module.seerr.container_name
     byparr      = module.byparr.container_name
 
   }

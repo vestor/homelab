@@ -78,8 +78,8 @@ variable "bazarr_config_vol" {
   type        = string
 }
 
-variable "jellyseerr_config_vol" {
-  description = "Docker volume for Jellyseerr configuration"
+variable "seerr_config_vol" {
+  description = "Docker volume for Seerr configuration"
   type        = string
 }
 

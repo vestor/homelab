@@ -114,3 +114,27 @@ variable "capabilities" {
   })
   default = null
 }
+
+variable "init" {
+  description = "Run an init process inside the container"
+  type        = bool
+  default     = false
+}
+
+variable "must_run" {
+  description = "If true, Terraform will ensure the container is running. Set to false for containers managed externally (e.g. toggle scripts)."
+  type        = bool
+  default     = true
+}
+
+variable "start" {
+  description = "Whether to start the container on creation. Set to false for containers that should begin stopped."
+  type        = bool
+  default     = true
+}
+
+variable "restrict_to_admins" {
+  description = "When true and Traefik is enabled, apply the admin-only IPAllowList middleware to block member IPs."
+  type        = bool
+  default     = true
+}

@@ -83,8 +83,12 @@ module "homepage" {
     "HOMEPAGE_VAR_DOCKER_HOST=${var.socket_proxy_name}",
     "HOMEPAGE_VAR_DOCKER_PORT=2375",
     "HOMEPAGE_VAR_DOCKER_SOCKET=tcp",
-    "HOMEPAGE_ALLOWED_HOSTS=homelab:3000,localhost:3000,127.0.0.1:3000"
+    "HOMEPAGE_ALLOWED_HOSTS=homelab:3000,localhost:3000,127.0.0.1:3000,homepage.${var.domain_name},${var.domain_name}"
   ]
+
+  custom_labels = {
+    "traefik.http.routers.homepage.rule" = "Host(`homepage.${var.domain_name}`)"
+  }
 
   volume_mappings = [
     {
@@ -135,4 +139,98 @@ module "whatsup_docker" {
     "homepage.description" = "Docker Update Monitor"
   }
 
+}
+
+# Copy config file for Glance to the remote server
+resource "null_resource" "glance_config_files" {
+  connection {
+    type        = "ssh"
+    user        = var.ssh_user
+    host        = var.ssh_host
+    private_key = file(var.ssh_key_path)
+  }
+
+  triggers = {
+    glance_sha1 = sha1(templatefile("${path.root}/templates/glance.yaml.tftpl", {
+      domain_name         = var.domain_name
+      mergerfs_mount_path = var.mergerfs_mount_path
+    }))
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "mkdir -p /tmp/glance-config"
+    ]
+  }
+
+  provisioner "file" {
+    content     = templatefile("${path.root}/templates/glance.yaml.tftpl", {
+      domain_name         = var.domain_name
+      mergerfs_mount_path = var.mergerfs_mount_path
+    })
+    destination = "/tmp/glance-config/glance.yml"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /var/lib/docker/volumes/${var.glance_config_vol}/_data",
+      "sudo cp /tmp/glance-config/glance.yml /var/lib/docker/volumes/${var.glance_config_vol}/_data/glance.yml",
+      "sudo chown -R 1000:1000 /var/lib/docker/volumes/${var.glance_config_vol}/_data/",
+      "sudo chmod -R 755 /var/lib/docker/volumes/${var.glance_config_vol}/_data/",
+      "rm -rf /tmp/glance-config"
+    ]
+  }
+}
+
+# Glance dashboard
+module "glance" {
+  source = "../service_template"
+  depends_on = [null_resource.glance_config_files]
+
+  service_name   = "glance"
+  image          = "glanceapp/glance:latest"
+  domain_name    = var.domain_name
+  timezone       = var.timezone
+  network_ids    = [var.traefik_network_id]
+  container_user = "0:0"
+  privileged     = true
+
+  web_port     = 8080
+  port_mappings = [
+    {
+      internal = 8080
+      external = 8082
+    }
+  ]
+
+  custom_labels = {
+    "traefik.http.routers.glance.rule" = "Host(`glance.${var.domain_name}`) || Host(`${var.domain_name}`)"
+    "homepage.group"       = "Management"
+    "homepage.name"        = "Glance"
+    "homepage.icon"        = "glance.png"
+    "homepage.href"        = "https://${var.domain_name}"
+    "homepage.description" = "Dashboard"
+  }
+
+  volume_mappings = [
+    {
+      volume_name    = var.glance_config_vol
+      container_path = "/app/config"
+    },
+    {
+      host_path      = "/var/run/docker.sock"
+      container_path = "/var/run/docker.sock"
+      read_only      = true
+    },
+    {
+      host_path      = "/"
+      container_path = "/host"
+      read_only      = true
+    },
+    {
+      host_path      = var.mergerfs_mount_path
+      container_path = var.mergerfs_mount_path
+      read_only      = true
+    }
+  ]
 }

@@ -39,9 +39,12 @@ resource "null_resource" "traefik_config" {
       "    address: ':8443'",
       "providers:",
       "  docker:",
-      "    endpoint: 'tcp://${var.socket_proxy_name}:2375'",
+      "    endpoint: 'tcp://127.0.0.1:2375'",
       "    exposedByDefault: false",
       "    network: traefik_net",
+      "    watch: true",
+      "  file:",
+      "    directory: /etc/traefik/configs",
       "    watch: true",
       "api:",
       "  dashboard: true",
@@ -66,18 +69,17 @@ resource "null_resource" "traefik_config" {
       "sudo cat > /tmp/dynamic.yml << 'EOL'",
       "http:",
       "  middlewares:",
-      "    tailscale-ip-whitelist:",
+      "    admin-only:",
       "      ipAllowList:",
       "        sourceRange:",
       "          - '127.0.0.1/32'       # Local traffic",
       "          - '192.168.0.0/16'     # Local LAN traffic",
-      "          - '10.0.0.0/8'         # Tailscale IP range",
-      "          - '100.64.0.0/10'      # Tailscale IP range (CGNAT)",
-      "    local-ip-whitelist:",
-      "      ipAllowList:",
-      "        sourceRange:",
-      "          - '127.0.0.1/32'       # Local traffic",
-      "          - '192.168.0.0/16'     # Local LAN traffic",
+      "          - '100.64.0.0/14'      # Tailscale 100.64-67.x.x",
+      "          - '100.68.0.0/15'      # Tailscale 100.68-69.x.x",
+      "          - '100.71.0.0/16'      # Tailscale 100.71.x.x",
+      "          - '100.72.0.0/13'      # Tailscale 100.72-79.x.x",
+      "          - '100.80.0.0/12'      # Tailscale 100.80-95.x.x",
+      "          - '100.96.0.0/11'      # Tailscale 100.96-127.x.x",
       "EOL",
       "sudo cp /tmp/dynamic.yml /var/lib/docker/volumes/${var.traefik_config_vol}/_data/configs/",
       "sudo chmod 644 /var/lib/docker/volumes/${var.traefik_config_vol}/_data/traefik.yml",
@@ -90,32 +92,16 @@ resource "null_resource" "traefik_config" {
 # Update the Traefik container with HTTPS support and Cloudflare DNS
 resource "docker_container" "traefik" {
   name  = "traefik"
-  image = "traefik:v3.6"
+  image = "traefik:v3.6.8"
   restart = "unless-stopped"
   user = "0:0"
+  network_mode = "host"
 
   # Add a brief delay before Traefik starts to ensure socket-proxy is ready
   command = [
     "sh", "-c",
     "sleep 5 && /usr/local/bin/traefik --configFile=/etc/traefik/traefik.yml"
   ]
-
-  ports {
-    internal = 80
-    external = 80
-  }
-  ports {
-    internal = 443
-    external = 443
-  }
-  ports {
-    internal = 8080
-    external = 8081
-  }
-  ports {
-    internal = 8443
-    external = 8443
-  }
 
   env = [
     "CF_API_EMAIL=${var.cloudflare_email}",
@@ -124,6 +110,35 @@ resource "docker_container" "traefik" {
     "TZ=${var.timezone}"
   ]
 
+  labels {
+    label = "traefik.enable"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.traefik.rule"
+    value = "Host(`traefik.${var.domain_name}`)"
+  }
+  labels {
+    label = "traefik.http.routers.traefik.entrypoints"
+    value = "web,websecure"
+  }
+  labels {
+    label = "traefik.http.routers.traefik.tls"
+    value = "true"
+  }
+  labels {
+    label = "traefik.http.routers.traefik.tls.certresolver"
+    value = "cloudflare"
+  }
+  labels {
+    label = "traefik.http.services.traefik.loadbalancer.server.port"
+    value = "8080"
+  }
+  labels {
+    label = "traefik.http.routers.traefik.middlewares"
+    value = "admin-only@file"
+  }
+
   volumes {
     volume_name    = var.traefik_config_vol
     container_path = "/etc/traefik"
@@ -131,10 +146,6 @@ resource "docker_container" "traefik" {
   volumes {
     volume_name    = var.traefik_acme_vol
     container_path = "/acme"
-  }
-
-  networks_advanced {
-    name = var.traefik_network_id
   }
 
   depends_on = [
@@ -152,7 +163,7 @@ resource "docker_container" "tailscale" {
   env = [
     "TS_AUTH_KEY=${var.tailscale_auth_key}",
     "TS_STATE_DIR=/var/lib/tailscale",
-    "TS_EXTRA_ARGS=--hostname=homelab --advertise-tags=tag:homelab"
+    "TS_EXTRA_ARGS=--hostname=homelab --advertise-tags=tag:homelab --advertise-exit-node --accept-dns=false --reset"
   ]
 
   volumes {
@@ -271,11 +282,12 @@ resource "null_resource" "coredns_config" {
       "}",
       "# Handle your custom domain",
       "${var.domain_name}:53 {",
-      "    hosts {",
-      "        ${var.ssh_host} *.${var.domain_name}",
+      "    template IN A ${var.domain_name} {",
+      "        match (.*\\.)?${var.domain_name}",
+      "        answer \"{{ .Name }} 60 IN A ${var.local_ip}\"",
       "        fallthrough",
       "    }",
-      "    # Important: Forward queries that hosts plugin doesn't answer",
+      "    # Forward queries that template doesn't answer",
       "    forward . 8.8.8.8 8.8.4.4",
       "    # Enable DNS cache",
       "    cache 30",
@@ -296,22 +308,6 @@ resource "docker_container" "coredns" {
   name  = "coredns"
   image = "coredns/coredns:latest"
   restart = "unless-stopped"
-
-  # Port mappings
-  ports {
-    internal = 53
-    external = 53
-    protocol = "udp"
-  }
-  ports {
-    internal = 53
-    external = 53
-    protocol = "tcp"
-  }
-  ports {
-    internal = 9153
-    external = 9153
-  }
 
   volumes {
     volume_name    = docker_volume.coredns_config.name
@@ -351,6 +347,16 @@ resource "docker_container" "coredns" {
 resource "cloudflare_record" "homelab" {
   zone_id = var.cloudflare_zone_id
   name    = "*"
+  value   = data.external.tailscale_ip.result.ip
+  type    = "A"
+  ttl     = 1
+  proxied = false
+}
+
+# Apex domain record
+resource "cloudflare_record" "homelab_apex" {
+  zone_id = var.cloudflare_zone_id
+  name    = "@"
   value   = data.external.tailscale_ip.result.ip
   type    = "A"
   ttl     = 1

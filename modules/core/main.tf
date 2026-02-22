@@ -21,7 +21,7 @@ resource "docker_volume" "volumes" {
     # Media services
     "radarr_config", "sonarr_config", "prowlarr_config",
     "qbittorrent_config", "jellyfin_config", "jellyfin_cache",
-    "bazarr_config", "jellyseerr_config", "byparr_config",
+    "bazarr_config", "seerr_config", "byparr_config",
 
     # Home automation
     "hyperhdr_config", "homeassistant_config",
@@ -30,10 +30,11 @@ resource "docker_volume" "volumes" {
     "traefik_config", "traefik_acme", "tailscale_data",
 
     # Dashboards and management
-    "homepage_config", "whatsup_docker_data",
+    "homepage_config", "whatsup_docker_data", "glance_config",
 
     # Gaming
-    "palworld_config"
+    "palworld_config",
+    "palworld_toggle_data"
   ])
 
   name = each.key
