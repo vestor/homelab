@@ -28,3 +28,25 @@ output "traefik_dashboard_url" {
   description = "URL for the Traefik dashboard"
   value       = "http://${var.ssh_host}:8081/dashboard/"
 }
+
+output "glance_services" {
+  description = "Service definitions for Glance dashboard"
+  value = [
+    {
+      name         = "Speedtest"
+      group        = "Infrastructure"
+      url          = "https://speedtest.${var.domain_name}"
+      icon         = "si:speedtest"
+      internal_url = "http://speedtest:80"
+      github_repo  = "alexjustesen/speedtest-tracker"
+    },
+    {
+      name         = "Uptime Kuma"
+      group        = "Infrastructure"
+      url          = "https://uptime.${var.domain_name}"
+      icon         = "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/uptime-kuma.svg"
+      internal_url = "http://uptime:3001"
+      github_repo  = "louislam/uptime-kuma"
+    }
+  ]
+}

@@ -76,12 +76,7 @@ module "palworld" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Gaming"
-    "homepage.name"        = "Palworld"
-    "homepage.icon"        = "palworld.png"
-    "homepage.description" = "Palworld Dedicated Server"
-  }
+  custom_labels = {}
 }
 
 # Upload toggle script to Docker volume via SSH
@@ -153,12 +148,7 @@ module "paledit" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Gaming"
-    "homepage.name"        = "Pal Editor"
-    "homepage.icon"        = "palworld.png"
-    "homepage.description" = "Palworld Save Editor"
-  }
+  custom_labels = {}
 }
 
 # Toggle service - controls palworld/paledit switching

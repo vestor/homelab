@@ -343,6 +343,52 @@ resource "docker_container" "coredns" {
   depends_on = [null_resource.coredns_config]
 }
 
+# Speedtest Tracker - periodic internet speed tests
+module "speedtest" {
+  source = "../service_template"
+
+  service_name = "speedtest"
+  image        = "linuxserver/speedtest-tracker:latest"
+  domain_name  = var.domain_name
+  timezone     = var.timezone
+  network_ids  = [var.traefik_network_id]
+
+  web_port = 80
+  port_mappings = [
+    { internal = 80, external = 8765 }
+  ]
+
+  volume_mappings = [
+    { volume_name = var.speedtest_config_vol, container_path = "/config" }
+  ]
+
+  custom_env = [
+    "APP_KEY=${var.speedtest_app_key}",
+    "SPEEDTEST_SCHEDULE=0 * * * *",
+    "DISPLAY_TIMEZONE=${var.timezone}"
+  ]
+}
+
+# Uptime Kuma - uptime monitoring with response time graphs
+module "uptime_kuma" {
+  source = "../service_template"
+
+  service_name = "uptime"
+  image        = "louislam/uptime-kuma:1"
+  domain_name  = var.domain_name
+  timezone     = var.timezone
+  network_ids  = [var.traefik_network_id]
+
+  web_port = 3001
+  port_mappings = [
+    { internal = 3001, external = 3002 }
+  ]
+
+  volume_mappings = [
+    { volume_name = var.uptime_kuma_data_vol, container_path = "/app/data" }
+  ]
+}
+
 # Update the Cloudflare DNS record
 resource "cloudflare_record" "homelab" {
   zone_id = var.cloudflare_zone_id

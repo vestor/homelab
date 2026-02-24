@@ -38,3 +38,32 @@ variable "storage_mount_base" {
   type        = string
   default     = "/mnt/disks"
 }
+
+# Network Variables
+variable "traefik_network_id" {
+  description = "ID of the Traefik network"
+  type        = string
+}
+
+# Service Variables
+variable "domain_name" {
+  description = "Base domain name for Traefik routing"
+  type        = string
+}
+
+variable "timezone" {
+  description = "Local timezone for containers"
+  type        = string
+  default     = "UTC"
+}
+
+# Volume Variables
+variable "scrutiny_config_vol" {
+  description = "Docker volume for Scrutiny configuration"
+  type        = string
+}
+
+variable "scrutiny_influxdb_vol" {
+  description = "Docker volume for Scrutiny InfluxDB data"
+  type        = string
+}

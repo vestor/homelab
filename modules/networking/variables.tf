@@ -82,3 +82,20 @@ variable "local_ip" {
   description = "Local LAN IP address of the CoreOS machine"
   type        = string
 }
+
+# Network monitoring
+variable "speedtest_app_key" {
+  description = "Laravel APP_KEY for Speedtest Tracker"
+  type        = string
+  sensitive   = true
+}
+
+variable "speedtest_config_vol" {
+  description = "Docker volume for Speedtest Tracker configuration"
+  type        = string
+}
+
+variable "uptime_kuma_data_vol" {
+  description = "Docker volume for Uptime Kuma data"
+  type        = string
+}

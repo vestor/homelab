@@ -43,15 +43,7 @@ module "jellyfin" {
 
   # Add device mapping for hardware transcoding if available
   custom_labels = {
-    "autoheal"                  = "true"
-    "homepage.group"            = "Media Server"
-    "homepage.name"             = "Jellyfin"
-    "homepage.icon"             = "jellyfin.png"
-    "homepage.href"             = "https://jellyfin.${var.domain_name}"
-    "homepage.description"      = "Media Server"
-    "homepage.widget.type"      = "jellyfin"
-    "homepage.widget.url"       = "https://jellyfin.${var.domain_name}"
-    "homepage.widget.key"       = "set-this-in-jellyfin"
+    "autoheal" = "true"
   }
 }
 
@@ -84,16 +76,7 @@ module "radarr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Radarr"
-    "homepage.icon"        = "radarr.png"
-    "homepage.href"        = "https://radarr.${var.domain_name}"
-    "homepage.description" = "Movie Management"
-    "homepage.widget.type" = "radarr"
-    "homepage.widget.url"  = "https://radarr.${var.domain_name}"
-    "homepage.widget.key"  = "set-this-in-radarr"
-  }
+  custom_labels = {}
 }
 
 # Sonarr - TV Show management
@@ -125,16 +108,7 @@ module "sonarr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Sonarr"
-    "homepage.icon"        = "sonarr.png"
-    "homepage.href"        = "https://sonarr.${var.domain_name}"
-    "homepage.description" = "TV Show Management"
-    "homepage.widget.type" = "sonarr"
-    "homepage.widget.url"  = "https://sonarr.${var.domain_name}"
-    "homepage.widget.key"  = "set-this-in-sonarr"
-  }
+  custom_labels = {}
 }
 
 # Prowlarr - Indexer management
@@ -162,13 +136,7 @@ module "prowlarr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Prowlarr"
-    "homepage.icon"        = "prowlarr.png"
-    "homepage.href"        = "https://prowlarr.${var.domain_name}"
-    "homepage.description" = "Indexer Management"
-  }
+  custom_labels = {}
 }
 
 # qBittorrent - Download client
@@ -213,13 +181,7 @@ module "qbittorrent" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "qBittorrent"
-    "homepage.icon"        = "qbittorrent.png"
-    "homepage.href"        = "https://qbittorrent.${var.domain_name}"
-    "homepage.description" = "Download Client"
-  }
+  custom_labels = {}
 }
 
 # Bazarr - Subtitle management
@@ -251,13 +213,7 @@ module "bazarr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Bazarr"
-    "homepage.icon"        = "bazarr.png"
-    "homepage.href"        = "https://bazarr.${var.domain_name}"
-    "homepage.description" = "Subtitle Management"
-  }
+  custom_labels = {}
 }
 
 # Seerr - Media request management
@@ -286,13 +242,7 @@ module "seerr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Seerr"
-    "homepage.icon"        = "overseerr.png"
-    "homepage.href"        = "https://seerr.${var.domain_name}"
-    "homepage.description" = "Media Requests"
-  }
+  custom_labels = {}
 }
 
 # Byparr - Cloudflare bypass service
@@ -320,11 +270,5 @@ module "byparr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Media Management"
-    "homepage.name"        = "Byparr"
-    "homepage.icon"        = "byparr.png"
-    "homepage.href"        = "https://byparr.${var.domain_name}"
-    "homepage.description" = "Cloudflare Bypass Service"
-  }
+  custom_labels = {}
 }

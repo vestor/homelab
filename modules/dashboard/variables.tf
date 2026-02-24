@@ -42,12 +42,21 @@ variable "socket_proxy_name" {
   type        = string
 }
 
-# Volume Variables
-variable "homepage_config_vol" {
-  description = "Docker volume for Homepage configuration"
-  type        = string
+# Glance services from other modules
+variable "glance_services" {
+  description = "List of services to display in Glance dashboard"
+  type = list(object({
+    name         = string
+    group        = string
+    url          = string
+    icon         = optional(string, "")
+    internal_url = optional(string, "")
+    github_repo  = optional(string, "")
+  }))
+  default = []
 }
 
+# Volume Variables
 variable "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   type        = string
@@ -56,4 +65,35 @@ variable "whatsup_docker_data_vol" {
 variable "glance_config_vol" {
   description = "Docker volume for Glance configuration"
   type        = string
+}
+
+variable "scrutiny_url" {
+  description = "Internal URL for Scrutiny API"
+  type        = string
+  default     = "http://scrutiny:8080"
+}
+
+variable "speedtest_url" {
+  description = "Internal URL for Speedtest Tracker API"
+  type        = string
+  default     = "http://speedtest:80"
+}
+
+variable "speedtest_api_token" {
+  description = "Speedtest Tracker API token for Glance widget"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "uptime_kuma_url" {
+  description = "External URL for Uptime Kuma"
+  type        = string
+  default     = ""
+}
+
+variable "local_ip" {
+  description = "Local LAN IP address of the CoreOS machine"
+  type        = string
+  default     = ""
 }

@@ -108,61 +108,31 @@ resource "docker_container" "mergerfs" {
   depends_on = [null_resource.setup_disk_mounts]
 }
 
-# Storage health check - optional resource to monitor disk health
-resource "null_resource" "setup_disk_health_monitoring" {
-  connection {
-    type        = "ssh"
-    user        = var.ssh_user
-    host        = var.ssh_host
-    private_key = file(var.ssh_key_path)
-  }
+# Scrutiny - SMART disk health monitoring
+module "scrutiny" {
+  source = "../service_template"
 
-  provisioner "remote-exec" {
-    inline = [
-      # Create a basic disk health check script that doesn't rely on smartmontools
-      "sudo mkdir -p /etc/container-scripts",
-      "sudo tee /etc/container-scripts/check_disk_health.sh > /dev/null << 'EOF'",
-      "#!/bin/bash",
-      "echo \"Disk Space Usage - $(date)\"",
-      "echo \"=========================\"",
-      "df -h | grep -v tmpfs",
-      "echo \"\"",
-      "echo \"Disk I/O Status\"",
-      "echo \"==============\"",
-      "iostat -x | grep -v loop",
-      "EOF",
-      "sudo chmod +x /etc/container-scripts/check_disk_health.sh",
+  service_name = "scrutiny"
+  image        = "ghcr.io/analogj/scrutiny:master-omnibus"
+  privileged   = true
+  domain_name  = var.domain_name
+  timezone     = var.timezone
+  network_ids  = [var.traefik_network_id]
 
-      # Setup a systemd timer to run the check periodically
-      "sudo tee /etc/systemd/system/disk-health-check.service > /dev/null << 'EOF'",
-      "[Unit]",
-      "Description=Simple Disk Health Check",
-      "[Service]",
-      "Type=oneshot",
-      "ExecStart=/etc/container-scripts/check_disk_health.sh",
-      "StandardOutput=journal+console",
-      "[Install]",
-      "WantedBy=multi-user.target",
-      "EOF",
+  web_port = 8080
+  port_mappings = [
+    { internal = 8080, external = 8085 }
+  ]
 
-      "sudo tee /etc/systemd/system/disk-health-check.timer > /dev/null << 'EOF'",
-      "[Unit]",
-      "Description=Run disk health check weekly",
+  volume_mappings = [
+    { volume_name = var.scrutiny_config_vol, container_path = "/opt/scrutiny/config" },
+    { volume_name = var.scrutiny_influxdb_vol, container_path = "/opt/scrutiny/influxdb" },
+    { host_path = "/run/udev", container_path = "/run/udev", read_only = true },
+  ]
 
-      "[Timer]",
-      "OnCalendar=weekly",
-      "Persistent=true",
+  custom_env = [
+    "COLLECTOR_CRON_SCHEDULE=0 0 * * *"
+  ]
 
-      "[Install]",
-      "WantedBy=timers.target",
-      "EOF",
-
-      # Enable and start the timer
-      "sudo systemctl daemon-reload || true",
-      "sudo systemctl enable disk-health-check.timer || true",
-      "sudo systemctl start disk-health-check.timer || true"
-    ]
-  }
-
-  depends_on = [null_resource.setup_disk_mounts]
+  capabilities = { add = ["SYS_RAWIO"] }
 }

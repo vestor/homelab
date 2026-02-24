@@ -89,11 +89,6 @@ output "hyperhdr_config_vol" {
 }
 
 # Volume outputs - for dashboards and management
-output "homepage_config_vol" {
-  description = "Docker volume for Homepage configuration"
-  value       = docker_volume.volumes["homepage_config"].name
-}
-
 output "whatsup_docker_data_vol" {
   description = "Docker volume for What's Up Docker data"
   value       = docker_volume.volumes["whatsup_docker_data"].name
@@ -102,6 +97,17 @@ output "whatsup_docker_data_vol" {
 output "glance_config_vol" {
   description = "Docker volume for Glance configuration"
   value       = docker_volume.volumes["glance_config"].name
+}
+
+# Volume outputs - for storage monitoring
+output "scrutiny_config_vol" {
+  description = "Docker volume for Scrutiny configuration"
+  value       = docker_volume.volumes["scrutiny_config"].name
+}
+
+output "scrutiny_influxdb_vol" {
+  description = "Docker volume for Scrutiny InfluxDB data"
+  value       = docker_volume.volumes["scrutiny_influxdb"].name
 }
 
 # Volume outputs - for gaming
@@ -113,4 +119,31 @@ output "palworld_config_vol" {
 output "palworld_toggle_data_vol" {
   description = "Docker volume for Palworld toggle service data"
   value       = docker_volume.volumes["palworld_toggle_data"].name
+}
+
+# Volume outputs - for network monitoring
+output "speedtest_config_vol" {
+  description = "Docker volume for Speedtest Tracker configuration"
+  value       = docker_volume.volumes["speedtest_config"].name
+}
+
+output "uptime_kuma_data_vol" {
+  description = "Docker volume for Uptime Kuma data"
+  value       = docker_volume.volumes["uptime_kuma_data"].name
+}
+
+# Volume outputs - for monitoring stack
+output "prometheus_config_vol" {
+  description = "Docker volume for Prometheus configuration"
+  value       = docker_volume.volumes["prometheus_config"].name
+}
+
+output "prometheus_data_vol" {
+  description = "Docker volume for Prometheus time-series data"
+  value       = docker_volume.volumes["prometheus_data"].name
+}
+
+output "grafana_data_vol" {
+  description = "Docker volume for Grafana data"
+  value       = docker_volume.volumes["grafana_data"].name
 }

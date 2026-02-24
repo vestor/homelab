@@ -13,10 +13,6 @@ pages:
     columns:
       - size: small
         widgets:
-          - type: search
-            search-engine: google
-            autofocus: true
-
           - type: clock
             hour-format: 24h
             timezones:
@@ -30,118 +26,215 @@ pages:
 
           - type: bookmarks
             groups:
-              - title: Media
-                color: 40 60 55
+%{ for group in bookmark_groups ~}
+              - title: ${group.title}
+                color: ${group.color}
                 links:
-                  - title: Jellyfin
-                    url: https://jellyfin.${domain_name}
-                  - title: Seerr
-                    url: https://seerr.${domain_name}
-
-              - title: Media Management
-                color: 270 40 60
-                links:
-                  - title: Sonarr
-                    url: https://sonarr.${domain_name}
-                  - title: Radarr
-                    url: https://radarr.${domain_name}
-                  - title: Bazarr
-                    url: https://bazarr.${domain_name}
-                  - title: Prowlarr
-                    url: https://prowlarr.${domain_name}
-                  - title: qBittorrent
-                    url: https://qbittorrent.${domain_name}
-
-              - title: Home Automation
-                color: 200 50 60
-                links:
-                  - title: Home Assistant
-                    url: https://homeassistant.${domain_name}
-                  - title: HyperHDR
-                    url: https://hyperhdr.${domain_name}
-
-              - title: Infrastructure
-                color: 150 45 55
-                links:
-                  - title: Traefik
-                    url: https://traefik.${domain_name}
-                  - title: Homepage
-                    url: https://homepage.${domain_name}
-                  - title: What's Up Docker
-                    url: https://whatsup.${domain_name}
-
-              - title: Gaming
-                color: 0 55 60
-                links:
-                  - title: Palworld
-                    url: https://palworld.${domain_name}
-                  - title: Pal Editor
-                    url: https://paledit.${domain_name}
+%{ for link in group.links ~}
+                  - title: ${link.title}
+                    url: ${link.url}
+%{ endfor ~}
+%{ endfor ~}
 
       - size: full
         widgets:
+          - type: custom-api
+            title: Uptime
+            cache: 5m
+            url: http://uptime:3001/api/status-page/homelab
+            subrequests:
+              heartbeats:
+                url: http://uptime:3001/api/status-page/heartbeat/homelab
+            template: |
+              {{- $hb := .Subrequest "heartbeats" }}
+              {{- $groups := .JSON.Array "publicGroupList" }}
+              {{- range $groups }}
+                {{- $monitors := .Array "monitorList" }}
+                {{- range $monitors }}
+                  {{- $name := .String "name" }}
+                  {{- $id := .String "id" }}
+                  {{- $beats := $hb.JSON.Array (print "heartbeatList." $id) }}
+                  {{- $latest := index $beats (sub (len $beats) 1) }}
+                  {{- $ping := printf "%.0f" ($latest.Get "ping").Num }}
+                  {{- $status := ($latest.Get "status").Num }}
+                  {{- $uptime := printf "%.1f" (mul ($hb.JSON.Float (print "uptimeList." $id "_24")) 100) }}
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                    <strong class="color-highlight" style="font-size: 1.3rem; text-transform: capitalize;">{{ $name }}</strong>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <span class="color-primary" style="font-size: 1.1rem;">{{ $ping }}ms</span>
+                      <span class="color-primary" style="font-size: 1.1rem;">{{ $uptime }}%</span>
+                      {{- if eq $status 1.0 }}
+                        <span title="Up" style="font-size: 16px; cursor: default;" class="color-positive">●</span>
+                      {{- else }}
+                        <span title="Down" style="font-size: 16px; cursor: default;" class="color-negative">●</span>
+                      {{- end }}
+                    </div>
+                  </div>
+                {{- end }}
+              {{- end }}
+
+          - type: split-column
+            widgets:
+              - type: iframe
+                title: CPU Usage
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=1&theme=dark&from=now-24h&to=now&refresh=1m
+                height: 200
+              - type: iframe
+                title: Memory Usage
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=2&theme=dark&from=now-24h&to=now&refresh=1m
+                height: 200
+
+          - type: split-column
+            widgets:
+              - type: iframe
+                title: Disk I/O
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=3&theme=dark&from=now-24h&to=now&refresh=1m
+                height: 200
+              - type: iframe
+                title: System Temperature
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=4&theme=dark&from=now-24h&to=now&refresh=1m
+                height: 200
+
+          - type: custom-api
+            title: Drive Health
+            cache: 1h
+            url: ${scrutiny_url}/api/summary
+            template: |
+              {{- $drives := .JSON.Array "data.summary|@values" }}
+              {{- $sorted := sortByString "device.device_name" "asc" $drives }}
+              {{- $total := 0 }}
+              {{- range $sorted }}
+                {{- $archived := .Get "device.archived" }}
+                {{- $archivedBool := false }}
+                {{- if $archived }}
+                  {{- $archivedBool = eq $archived.Raw "true" }}
+                {{- end }}
+                {{- if $archivedBool }}{{- continue }}{{- end }}
+                {{- $total = add $total 1 }}
+              {{- end }}
+              {{- $count := 0 }}
+              {{- range $sorted }}
+                {{- $archived := .Get "device.archived" }}
+                {{- $archivedBool := false }}
+                {{- if $archived }}
+                  {{- $archivedBool = eq $archived.Raw "true" }}
+                {{- end }}
+                {{- if $archivedBool }}{{- continue }}{{- end }}
+                {{- $count = add $count 1 }}
+                {{- $device := .Get "device" }}
+                {{- $deviceName := $device.String "device_name" }}
+                {{- $model := $device.String "model_name" }}
+                {{- $wwn := $device.String "wwn" }}
+                {{- $days := printf "%.0f" (div (.Get "smart.power_on_hours").Num 24) }}
+                {{- $capacity_print := printf "%.0f" (div (.Get "device.capacity").Num 1000000000) }}
+                {{- $status := (.Get "device.device_status").Num }}
+                {{- $tempHistory := .Array "temp_history" }}
+                {{- $latestTemp := index $tempHistory (sub (len $tempHistory) 1) }}
+                {{- $latestTempValue := $latestTemp.Int "temp" }}
+                {{- $minTemp := 100.0 }}
+                {{- $maxTemp := 0.0 }}
+                {{- range $tempHistory }}
+                  {{- $t := (.Get "temp").Num }}
+                  {{- if lt $t $minTemp }}{{- $minTemp = $t }}{{- end }}
+                  {{- if gt $t $maxTemp }}{{- $maxTemp = $t }}{{- end }}
+                {{- end }}
+                {{- $tempRange := sub $maxTemp $minTemp }}
+                {{- if lt $tempRange 1.0 }}{{- $tempRange = 1.0 }}{{- end }}
+                <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                  <a href="https://scrutiny.${domain_name}/web/device/{{ $wwn }}" target="_blank">
+                    <div>
+                      <strong class="color-highlight" style="text-transform: uppercase; font-size: 1.5rem;">
+                        /DEV/{{ $deviceName }} · {{ $capacity_print }}GB · {{ $latestTempValue }}°C
+                      </strong><br>
+                      <p class="color-highlight" style="margin: 0;">{{ $model }}</p>
+                      <div class="color-primary" style="font-size: 1.2rem;">Powered on for {{ $days }} days</div>
+                    </div>
+                  </a>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    {{- if eq $status 0.0 }}
+                      <span title="Passed Health Checks" style="font-size: 18px; cursor: default;" class="color-positive">●</span>
+                    {{- else }}
+                      <span title="Failed Health Checks" style="font-size: 18px; cursor: default;" class="color-negative">●</span>
+                    {{- end }}
+                  </div>
+                </div>
+                <div title="Temperature history" style="display: flex; align-items: flex-end; gap: 1px; height: 24px; margin-top: 0.5rem;">
+                  {{- range $tempHistory }}
+                    {{- $t := (.Get "temp").Num }}
+                    {{- $pct := mul (div (sub $t $minTemp) $tempRange) 100 }}
+                    {{- if lt $pct 5.0 }}{{- $pct = 5.0 }}{{- end }}
+                    <div title="{{ printf "%.0f" $t }}°C" style="flex: 1; height: {{ printf "%.0f" $pct }}%; background: currentColor; opacity: 0.4; border-radius: 1px 1px 0 0;"></div>
+                  {{- end }}
+                </div>
+                {{- if lt $count $total }}
+                  <hr class="color-secondary" style="margin: 1rem 0; border: none; border-bottom: 1px solid currentColor;" />
+                {{- end }}
+              {{- end }}
+
+%{ if speedtest_api_token != "" }
+          - type: custom-api
+            title: Internet Speed
+            url: ${speedtest_url}/api/v1/results/latest
+            headers:
+              Authorization: Bearer ${speedtest_api_token}
+              Accept: application/json
+            subrequests:
+              history:
+                url: ${speedtest_url}/api/v1/results?limit=24
+                headers:
+                  Authorization: Bearer ${speedtest_api_token}
+                  Accept: application/json
+            template: |
+              {{- $download := printf "%.0f" (div (.JSON.Float "data.download_bits") 1000000) }}
+              {{- $upload := printf "%.0f" (div (.JSON.Float "data.upload_bits") 1000000) }}
+              {{- $ping := printf "%.1f" (.JSON.Float "data.ping") }}
+              {{- $timestamp := .JSON.String "data.created_at" }}
+              <div style="display: flex; justify-content: space-around; text-align: center; margin-top: 1rem;">
+                <div>
+                  <div class="color-primary" style="font-size: 1.2rem;">Download</div>
+                  <strong class="color-highlight" style="font-size: 2rem;">{{ $download }}</strong>
+                  <span class="color-primary"> Mbps</span>
+                </div>
+                <div>
+                  <div class="color-primary" style="font-size: 1.2rem;">Upload</div>
+                  <strong class="color-highlight" style="font-size: 2rem;">{{ $upload }}</strong>
+                  <span class="color-primary"> Mbps</span>
+                </div>
+                <div>
+                  <div class="color-primary" style="font-size: 1.2rem;">Ping</div>
+                  <strong class="color-highlight" style="font-size: 2rem;">{{ $ping }}</strong>
+                  <span class="color-primary"> ms</span>
+                </div>
+              </div>
+              <div class="color-primary" style="text-align: center; margin-top: 0.5rem; font-size: 0.9rem;">{{ $timestamp }}</div>
+              {{- $history := .Subrequest "history" }}
+              {{- $results := $history.JSON.Array "data|@reverse" }}
+              {{- if gt (len $results) 1 }}
+                {{- $maxDl := 1.0 }}
+                {{- range $results }}
+                  {{- $dl := div (.Get "download_bits").Num 1000000 }}
+                  {{- if gt $dl $maxDl }}{{- $maxDl = $dl }}{{- end }}
+                {{- end }}
+                <div style="display: flex; align-items: flex-end; gap: 2px; height: 40px; margin-top: 0.75rem;">
+                  {{- range $results }}
+                    {{- $dl := div (.Get "download_bits").Num 1000000 }}
+                    {{- $pct := mul (div $dl $maxDl) 100 }}
+                    <div title="{{ printf "%.0f" $dl }} Mbps" style="flex: 1; height: {{ printf "%.0f" $pct }}%; min-height: 2px; background: currentColor; opacity: 0.4; border-radius: 2px 2px 0 0;"></div>
+                  {{- end }}
+                </div>
+              {{- end }}
+%{ endif }
+
           - type: iframe
-            source: https://toggle.${domain_name}
-            height: 200
-
-          - type: server-stats
-            servers:
-              - type: local
-                name: Homelab
-                hide-mountpoints-by-default: true
-                mountpoints:
-                  /host/sysroot:
-                    name: System
-                    hide: false
-                  ${mergerfs_mount_path}:
-                    name: Storage
-                    hide: false
-
-          - type: monitor
-            cache: 1m
-            title: Service Health
-            sites:
-              - title: Jellyfin
-                url: http://jellyfin:8096
-                icon: si:jellyfin
-              - title: Sonarr
-                url: http://sonarr:8989
-                icon: si:sonarr
-              - title: Radarr
-                url: http://radarr:7878
-                icon: si:radarr
-              - title: Prowlarr
-                url: http://prowlarr:9696
-                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/prowlarr.svg
-              - title: qBittorrent
-                url: http://qbittorrent:8099
-                icon: si:qbittorrent
-              - title: Seerr
-                url: http://seerr:5055
-                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/overseerr.svg
-              - title: Bazarr
-                url: http://bazarr:6767
-                icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/bazarr.svg
-              - title: Home Assistant
-                url: http://homeassistant:8123
-                icon: si:homeassistant
-              - title: Traefik
-                url: http://traefik:8080
-                icon: si:traefikproxy
-
-          - type: docker-containers
-            socket-path: /var/run/docker.sock
+            title: Network Traffic
+            source: https://grafana.${domain_name}/d-solo/network-traffic/network-traffic?orgId=1&panelId=1&theme=dark&from=now-24h&to=now&refresh=5m
+            height: 250
 
           - type: releases
             repositories:
-              - jellyfin/jellyfin
-              - Radarr/Radarr
-              - Sonarr/Sonarr
-              - Prowlarr/Prowlarr
-              - sct/overseerr
-              - home-assistant/core
-              - traefik/traefik
-              - glanceapp/glance
+%{ for repo in release_repos ~}
+              - ${repo}
+%{ endfor ~}
 
       - size: small
         widgets:
@@ -158,3 +251,24 @@ pages:
             collapse-after: 5
             feeds:
               - url: https://hnrss.org/frontpage
+
+  - name: Services
+    columns:
+      - size: full
+        widgets:
+          - type: iframe
+            source: https://toggle.${domain_name}
+            height: 200
+
+          - type: monitor
+            cache: 1m
+            title: Service Health
+            sites:
+%{ for svc in monitor_services ~}
+              - title: ${svc.title}
+                url: ${svc.url}
+                icon: ${svc.icon}
+%{ endfor ~}
+
+          - type: docker-containers
+            socket-path: /var/run/docker.sock

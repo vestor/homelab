@@ -30,11 +30,20 @@ resource "docker_volume" "volumes" {
     "traefik_config", "traefik_acme", "tailscale_data",
 
     # Dashboards and management
-    "homepage_config", "whatsup_docker_data", "glance_config",
+    "whatsup_docker_data", "glance_config",
+
+    # Storage monitoring
+    "scrutiny_config", "scrutiny_influxdb",
 
     # Gaming
     "palworld_config",
-    "palworld_toggle_data"
+    "palworld_toggle_data",
+
+    # Network monitoring
+    "speedtest_config", "uptime_kuma_data",
+
+    # Monitoring stack
+    "prometheus_config", "prometheus_data", "grafana_data"
   ])
 
   name = each.key

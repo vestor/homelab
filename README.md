@@ -1,42 +1,53 @@
-# Homelab Infrastructure as Code
+# Homelab Config
 
-This repository contains Terraform configurations to deploy and manage a comprehensive homelab environment. The infrastructure is designed to run on a CoreOS machine using Docker containers with a focus on media management, home automation, and system monitoring.
+Terraform configs for my homelab — a single CoreOS (Fedora) machine running everything in Docker containers, managed over SSH.
 
-## Features
+## What's Running
 
-- **Storage Management**:
-    - MergerFS for unified storage across multiple disks
-    - Disk health monitoring with custom scripts and systemd timers
-- **Reverse Proxy**:
-    - Traefik for service routing with hostname-based access
-- **Media Management**:
-    - **Jellyfin**: Media server with transcoding capabilities
-    - **Sonarr**: TV show management and automation
-    - **Radarr**: Movie management and automation
-    - **Bazarr**: Subtitle management for Sonarr and Radarr
-    - **Prowlarr**: Indexer management for *arr applications
-    - **qBittorrent**: Download client
-    - **Jellyseerr**: Media request and management
-- **Home Automation**:
-    - **Home Assistant**: Smart home control and automation
-    - **HyperHDR**: Ambient lighting control
-- **System Management**:
-    - **Tailscale**: Secure remote access
-    - **Homepage**: Unified dashboard for system monitoring and service access
-    - **Watchtower**: Automatic updates for Docker containers
-    - **WhatSup Docker**: Docker container monitoring
-    - **CoreDNS**: DNS server for local network
+**Media** — Jellyfin, Sonarr, Radarr, Bazarr, Prowlarr, qBittorrent, Jellyseerr, Byparr
 
-## Prerequisites
+**Home Automation** — Home Assistant, HyperHDR
 
-- A CoreOS or similar Linux machine with SSH access
-- Docker installed on the target machine
-- Terraform v1.0 or higher installed on your local machine
-- SSH key access to the target machine
+**Gaming** — Palworld dedicated server, Pal Editor
 
-## Getting Started
+**Monitoring** — Prometheus, Grafana, node_exporter, Uptime Kuma, Scrutiny, Speedtest Tracker
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/vestor/homelab.git
-   cd homelab
+**Networking** — Traefik (reverse proxy), Tailscale (VPN), Cloudflare DNS
+
+**Dashboard** — Glance (homepage), What's Up Docker
+
+**Storage** — MergerFS (pooled disks), Scrutiny (disk health)
+
+## How It Works
+
+- All services deploy as Docker containers using a shared `service_template` module
+- Traefik handles routing — each service gets a `*.pavish.online` subdomain
+- Tailscale provides secure remote access
+- Glance dashboard shows uptime, server metrics (via Grafana iframes), drive health, internet speed, network traffic, and release tracking
+- Volumes are centralized in the `core` module and passed to consuming modules
+
+## Structure
+
+```
+modules/
+  core/              # Networks, volumes, socket proxy
+  networking/        # Traefik, Tailscale, Cloudflare DNS, Speedtest, Uptime Kuma
+  monitoring/        # Prometheus, Grafana, node_exporter
+  media/             # Jellyfin, *arr stack, qBittorrent
+  home_automation/   # Home Assistant, HyperHDR
+  gaming/            # Palworld server
+  dashboard/         # Glance, What's Up Docker
+  storage/           # MergerFS, Scrutiny
+  service_template/  # Reusable module for deploying a Docker service
+templates/           # Glance config, Prometheus config, Grafana dashboards
+```
+
+## Setup
+
+Needs Terraform, SSH access to the target machine, and a `terraform.tfvars` with your secrets (Cloudflare, Tailscale, Palworld, etc).
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```

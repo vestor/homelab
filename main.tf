@@ -48,6 +48,12 @@ module "storage" {
   storage_disks       = var.storage_disks
   storage_mount_base  = var.storage_mount_base
 
+  traefik_network_id   = module.core.traefik_network_id
+  domain_name          = var.domain_name
+  timezone             = var.timezone
+  scrutiny_config_vol  = module.core.scrutiny_config_vol
+  scrutiny_influxdb_vol = module.core.scrutiny_influxdb_vol
+
   depends_on = [module.core]
 }
 
@@ -72,7 +78,30 @@ module "networking" {
   tailscale_data_vol  = module.core.tailscale_data_vol
   socket_proxy_name   = module.core.socket_proxy_name
 
+  speedtest_app_key    = var.speedtest_app_key
+  speedtest_config_vol = module.core.speedtest_config_vol
+  uptime_kuma_data_vol = module.core.uptime_kuma_data_vol
+
   depends_on = [module.core]
+}
+
+# Monitoring module - Prometheus, Grafana, node_exporter
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  ssh_host     = var.ssh_host
+  ssh_user     = var.ssh_user
+  ssh_key_path = var.ssh_key_path
+  domain_name  = var.domain_name
+  timezone     = var.timezone
+  local_ip     = var.local_ip
+
+  traefik_network_id    = module.core.traefik_network_id
+  prometheus_config_vol = module.core.prometheus_config_vol
+  prometheus_data_vol   = module.core.prometheus_data_vol
+  grafana_data_vol      = module.core.grafana_data_vol
+
+  depends_on = [module.core, module.networking]
 }
 
 # Media services module - Jellyfin, Radarr, Sonarr, etc.
@@ -143,9 +172,22 @@ module "dashboard" {
   traefik_network_id  = module.core.traefik_network_id
   socket_proxy_name   = module.core.socket_proxy_name
 
-  homepage_config_vol     = module.core.homepage_config_vol
   whatsup_docker_data_vol = module.core.whatsup_docker_data_vol
   glance_config_vol       = module.core.glance_config_vol
+
+  glance_services = concat(
+    module.media.glance_services,
+    module.home_automation.glance_services,
+    module.gaming.glance_services,
+    module.storage.glance_services,
+    module.networking.glance_services,
+    module.monitoring.glance_services,
+  )
+
+  speedtest_url       = "http://speedtest:80"
+  speedtest_api_token = var.speedtest_api_token
+  uptime_kuma_url     = "https://uptime.${var.domain_name}"
+  local_ip            = var.local_ip
 
   depends_on = [
     module.core,

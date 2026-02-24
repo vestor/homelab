@@ -25,13 +25,7 @@ module "homeassistant" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Home Automation"
-    "homepage.name"        = "Home Assistant"
-    "homepage.icon"        = "home-assistant.png"
-    "homepage.href"        = "https://homeassistant.${var.domain_name}"
-    "homepage.description" = "Home Automation Platform"
-  }
+  custom_labels = {}
 }
 
 # Set up HyperHDR container
@@ -139,11 +133,5 @@ module "hyperhdr" {
     }
   ]
 
-  custom_labels = {
-    "homepage.group"       = "Home Automation"
-    "homepage.name"        = "HyperHDR"
-    "homepage.icon"        = "hyperhdr.png"
-    "homepage.href"        = "https://hyperhdr.${var.domain_name}"
-    "homepage.description" = "Ambient Lighting Control"
-  }
+  custom_labels = {}
 }

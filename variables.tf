@@ -119,3 +119,17 @@ variable "paledit_password" {
   type        = string
   sensitive   = true
 }
+
+# Network Monitoring Variables
+variable "speedtest_app_key" {
+  description = "Laravel APP_KEY for Speedtest Tracker"
+  type        = string
+  sensitive   = true
+}
+
+variable "speedtest_api_token" {
+  description = "Speedtest Tracker API token for Glance widget"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
