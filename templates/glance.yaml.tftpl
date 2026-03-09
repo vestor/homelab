@@ -77,29 +77,122 @@ pages:
             widgets:
               - type: iframe
                 title: CPU Usage
-                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=1&theme=dark&from=now-24h&to=now&refresh=1m
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=1&theme=dark&from=now-6h&to=now&refresh=1m
                 height: 200
               - type: iframe
                 title: Memory Usage
-                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=2&theme=dark&from=now-24h&to=now&refresh=1m
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=2&theme=dark&from=now-6h&to=now&refresh=1m
                 height: 200
 
           - type: split-column
             widgets:
               - type: iframe
                 title: Disk I/O
-                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=3&theme=dark&from=now-24h&to=now&refresh=1m
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=3&theme=dark&from=now-6h&to=now&refresh=1m
                 height: 200
               - type: iframe
                 title: System Temperature
-                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=4&theme=dark&from=now-24h&to=now&refresh=1m
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=4&theme=dark&from=now-6h&to=now&refresh=1m
                 height: 200
+
+          - type: split-column
+            widgets:
+              - type: iframe
+                title: Network Traffic
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=5&theme=dark&from=now-6h&to=now&refresh=5m
+                height: 200
+              - type: iframe
+                title: iGPU Usage
+                source: https://grafana.${domain_name}/d-solo/homelab-server/homelab-server?orgId=1&panelId=6&theme=dark&from=now-6h&to=now&refresh=1m
+                height: 200
+
+          - type: custom-api
+            title: Storage Pool
+            cache: 5m
+            url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_size_bytes{mountpoint="/var/mnt/storage"}'
+            subrequests:
+              pool_avail:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_avail_bytes{mountpoint="/var/mnt/storage"}'
+              boot_size:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_size_bytes{mountpoint="/var"}'
+              boot_avail:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_avail_bytes{mountpoint="/var"}'
+%{ for i, uuid in storage_disks ~}
+              disk${i}_size:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_size_bytes{mountpoint="/var${storage_mount_base}/${uuid}"}'
+              disk${i}_avail:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_avail_bytes{mountpoint="/var${storage_mount_base}/${uuid}"}'
+%{ endfor ~}
+            template: |
+              {{- $poolAvail := .Subrequest "pool_avail" }}
+              {{- $bootSize := .Subrequest "boot_size" }}
+              {{- $bootAvail := .Subrequest "boot_avail" }}
+              {{- $poolSizeBytes := .JSON.Float "data.result.0.value.1" }}
+              {{- $poolAvailBytes := $poolAvail.JSON.Float "data.result.0.value.1" }}
+              {{- if gt $poolSizeBytes 0.0 }}
+                {{- $poolUsedBytes := sub $poolSizeBytes $poolAvailBytes }}
+                {{- $poolUsedPct := mul (div $poolUsedBytes $poolSizeBytes) 100 }}
+                {{- $poolTotalGB := printf "%.0f" (div $poolSizeBytes 1000000000) }}
+                {{- $poolFreeGB := printf "%.0f" (div $poolAvailBytes 1000000000) }}
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <strong class="color-highlight" style="font-size: 1.5rem;">MergerFS · {{ $poolTotalGB }}GB</strong>
+                  <span class="color-primary" style="font-size: 1.1rem;">{{ $poolFreeGB }}GB free</span>
+                </div>
+                <div style="height: 6px; background: hsl(0 0% 20%); border-radius: 3px; margin-top: 0.5rem; overflow: hidden;">
+                  <div style="height: 100%; width: {{ printf "%.1f" $poolUsedPct }}%; background: currentColor; opacity: 0.5; border-radius: 3px;"></div>
+                </div>
+              {{- else }}
+                <div>
+                  <strong class="color-highlight" style="font-size: 1.5rem;">MergerFS</strong>
+                  <span class="color-negative" style="font-size: 1.1rem; margin-left: 8px;">● Not mounted</span>
+                </div>
+              {{- end }}
+              <hr class="color-secondary" style="margin: 0.8rem 0; border: none; border-bottom: 1px solid currentColor;" />
+              {{- $bootSizeBytes := $bootSize.JSON.Float "data.result.0.value.1" }}
+              {{- $bootAvailBytes := $bootAvail.JSON.Float "data.result.0.value.1" }}
+              {{- if gt $bootSizeBytes 0.0 }}
+                {{- $bootFreeGB := printf "%.0f" (div $bootAvailBytes 1000000000) }}
+                {{- $bootTotalGB := printf "%.0f" (div $bootSizeBytes 1000000000) }}
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span class="color-highlight" style="font-size: 1.2rem;">Boot SSD (local)</span>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="color-primary" style="font-size: 1.1rem;">{{ $bootFreeGB }}GB / {{ $bootTotalGB }}GB free</span>
+                    <span class="color-positive" style="font-size: 14px;">●</span>
+                  </div>
+                </div>
+              {{- end }}
+%{ for i, uuid in storage_disks ~}
+              {{- $disk${i}Size := (.Subrequest "disk${i}_size").JSON.Float "data.result.0.value.1" }}
+              {{- $disk${i}Avail := (.Subrequest "disk${i}_avail").JSON.Float "data.result.0.value.1" }}
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                <span class="color-highlight" style="font-size: 1.2rem;">Disk ${i + 1} (${substr(uuid, 0, 8)})</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  {{- if gt $disk${i}Size 0.0 }}
+                    {{- $disk${i}Free := printf "%.0f" (div $disk${i}Avail 1000000000) }}
+                    {{- $disk${i}Total := printf "%.0f" (div $disk${i}Size 1000000000) }}
+                    <span class="color-primary" style="font-size: 1.1rem;">{{ $disk${i}Free }}GB / {{ $disk${i}Total }}GB free</span>
+                    <span class="color-positive" style="font-size: 14px;">●</span>
+                  {{- else }}
+                    <span class="color-negative" style="font-size: 1.1rem;">Not mounted</span>
+                    <span class="color-negative" style="font-size: 14px;">●</span>
+                  {{- end }}
+                </div>
+              </div>
+%{ endfor ~}
 
           - type: custom-api
             title: Drive Health
             cache: 1h
             url: ${scrutiny_url}/api/summary
+            subrequests:
+              fs_avail:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_avail_bytes{fstype=~"xfs|ext4|exfat|btrfs",mountpoint!="/boot"}'
+              fs_size:
+                url: 'http://prometheus:9090/api/v1/query?query=node_filesystem_size_bytes{fstype=~"xfs|ext4|exfat|btrfs",mountpoint!="/boot"}'
             template: |
+              {{- $fsAvail := .Subrequest "fs_avail" }}
+              {{- $fsSize := .Subrequest "fs_size" }}
+              {{- $q := "\"" }}
               {{- $drives := .JSON.Array "data.summary|@values" }}
               {{- $sorted := sortByString "device.device_name" "asc" $drives }}
               {{- $total := 0 }}
@@ -140,6 +233,9 @@ pages:
                 {{- end }}
                 {{- $tempRange := sub $maxTemp $minTemp }}
                 {{- if lt $tempRange 1.0 }}{{- $tempRange = 1.0 }}{{- end }}
+                {{- $fsMatchPath := print "data.result.#(metric.device%" $q "/dev/" $deviceName "*" $q ").value.1" }}
+                {{- $devSizeBytes := $fsSize.JSON.Float $fsMatchPath }}
+                {{- $devAvailBytes := $fsAvail.JSON.Float $fsMatchPath }}
                 <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
                   <a href="https://scrutiny.${domain_name}/web/device/{{ $wwn }}" target="_blank">
                     <div>
@@ -158,6 +254,24 @@ pages:
                     {{- end }}
                   </div>
                 </div>
+                {{- if gt $devSizeBytes 0.0 }}
+                  {{- $devUsedBytes := sub $devSizeBytes $devAvailBytes }}
+                  {{- $devUsedPct := mul (div $devUsedBytes $devSizeBytes) 100 }}
+                  {{- $devUsedGB := printf "%.0f" (div $devUsedBytes 1000000000) }}
+                  {{- $devTotalGB := printf "%.0f" (div $devSizeBytes 1000000000) }}
+                  {{- $devFreeGB := printf "%.0f" (div $devAvailBytes 1000000000) }}
+                  <div style="margin-top: 0.4rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 1.1rem;">
+                      <span class="color-primary">{{ $devUsedGB }}GB / {{ $devTotalGB }}GB used</span>
+                      <span class="color-primary">{{ $devFreeGB }}GB free</span>
+                    </div>
+                    <div style="height: 4px; background: hsl(0 0% 20%); border-radius: 2px; margin-top: 0.3rem; overflow: hidden;">
+                      <div style="height: 100%; width: {{ printf "%.1f" $devUsedPct }}%; background: currentColor; opacity: 0.5; border-radius: 2px;"></div>
+                    </div>
+                  </div>
+                {{- else }}
+                  <div class="color-primary" style="margin-top: 0.4rem; font-size: 1.1rem;">Not mounted</div>
+                {{- end }}
                 <div title="Temperature history" style="display: flex; align-items: flex-end; gap: 1px; height: 24px; margin-top: 0.5rem;">
                   {{- range $tempHistory }}
                     {{- $t := (.Get "temp").Num }}
@@ -225,11 +339,6 @@ pages:
               {{- end }}
 %{ endif }
 
-          - type: iframe
-            title: Network Traffic
-            source: https://grafana.${domain_name}/d-solo/network-traffic/network-traffic?orgId=1&panelId=1&theme=dark&from=now-24h&to=now&refresh=5m
-            height: 250
-
           - type: releases
             repositories:
 %{ for repo in release_repos ~}
@@ -251,6 +360,13 @@ pages:
             collapse-after: 5
             feeds:
               - url: https://hnrss.org/frontpage
+
+          - type: rss
+            title: Lobsters
+            limit: 15
+            collapse-after: 5
+            feeds:
+              - url: https://lobste.rs/rss
 
   - name: Services
     columns:

@@ -127,6 +127,8 @@ resource "null_resource" "glance_config_files" {
       speedtest_api_token = var.speedtest_api_token
       uptime_kuma_url     = var.uptime_kuma_url
       local_ip            = var.local_ip
+      storage_disks       = var.storage_disks
+      storage_mount_base  = var.storage_mount_base
     }))
   }
 
@@ -147,6 +149,8 @@ resource "null_resource" "glance_config_files" {
       speedtest_api_token = var.speedtest_api_token
       uptime_kuma_url     = var.uptime_kuma_url
       local_ip            = var.local_ip
+      storage_disks       = var.storage_disks
+      storage_mount_base  = var.storage_mount_base
     })
     destination = "/tmp/glance-config/glance.yml"
   }

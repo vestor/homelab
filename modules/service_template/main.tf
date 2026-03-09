@@ -76,6 +76,15 @@ resource "docker_container" "service" {
     }
   }
 
+  # Device mappings (e.g. GPU passthrough)
+  dynamic "devices" {
+    for_each = var.devices
+    content {
+      host_path      = devices.value.host_path
+      container_path = devices.value.container_path
+    }
+  }
+
   # Dynamic networks based on provided IDs
   dynamic "networks_advanced" {
     for_each = local.networks

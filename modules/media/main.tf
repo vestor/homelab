@@ -41,9 +41,16 @@ module "jellyfin" {
     }
   ]
 
-  # Add device mapping for hardware transcoding if available
+  devices = [
+    {
+      host_path      = "/dev/dri"
+      container_path = "/dev/dri"
+    }
+  ]
+
   custom_labels = {
-    "autoheal" = "true"
+    "autoheal"           = "true"
+    "depends-on-storage" = "true"
   }
 }
 
@@ -76,7 +83,9 @@ module "radarr" {
     }
   ]
 
-  custom_labels = {}
+  custom_labels = {
+    "depends-on-storage" = "true"
+  }
 }
 
 # Sonarr - TV Show management
@@ -108,7 +117,9 @@ module "sonarr" {
     }
   ]
 
-  custom_labels = {}
+  custom_labels = {
+    "depends-on-storage" = "true"
+  }
 }
 
 # Prowlarr - Indexer management
@@ -181,7 +192,9 @@ module "qbittorrent" {
     }
   ]
 
-  custom_labels = {}
+  custom_labels = {
+    "depends-on-storage" = "true"
+  }
 }
 
 # Bazarr - Subtitle management
@@ -213,7 +226,9 @@ module "bazarr" {
     }
   ]
 
-  custom_labels = {}
+  custom_labels = {
+    "depends-on-storage" = "true"
+  }
 }
 
 # Seerr - Media request management

@@ -43,6 +43,25 @@ resource "docker_container" "node_exporter" {
   }
 }
 
+# Intel iGPU exporter - GPU metrics (requires privileged + host PID)
+resource "docker_container" "igpu_exporter" {
+  name         = "igpu-exporter"
+  image        = "ghcr.io/mike1808/igpu-exporter:latest"
+  restart      = "unless-stopped"
+  privileged   = true
+  pid_mode     = "host"
+
+  ports {
+    internal = 8080
+    external = 9101
+  }
+
+  devices {
+    host_path      = "/dev/dri"
+    container_path = "/dev/dri"
+  }
+}
+
 # Provision Prometheus configuration via SSH
 resource "null_resource" "prometheus_config" {
   connection {
@@ -114,10 +133,7 @@ resource "null_resource" "grafana_provisioning" {
   }
 
   triggers = {
-    dashboards_sha1 = sha1(join("", [
-      file("${path.root}/templates/grafana/network-traffic.json"),
-      file("${path.root}/templates/grafana/homelab-server.json"),
-    ]))
+    dashboards_sha1 = sha1(file("${path.root}/templates/grafana/homelab-server.json"))
   }
 
   provisioner "remote-exec" {
@@ -166,11 +182,6 @@ resource "null_resource" "grafana_provisioning" {
 
   # Dashboard JSON files
   provisioner "file" {
-    source      = "${path.root}/templates/grafana/network-traffic.json"
-    destination = "/tmp/grafana-provisioning/network-traffic.json"
-  }
-
-  provisioner "file" {
     source      = "${path.root}/templates/grafana/homelab-server.json"
     destination = "/tmp/grafana-provisioning/homelab-server.json"
   }
@@ -179,8 +190,8 @@ resource "null_resource" "grafana_provisioning" {
     inline = [
       "sudo cp /tmp/grafana-provisioning/datasource.yml /var/lib/docker/volumes/${var.grafana_data_vol}/_data/provisioning/datasources/datasource.yml",
       "sudo cp /tmp/grafana-provisioning/dashboards.yml /var/lib/docker/volumes/${var.grafana_data_vol}/_data/provisioning/dashboards/dashboards.yml",
-      "sudo cp /tmp/grafana-provisioning/network-traffic.json /var/lib/docker/volumes/${var.grafana_data_vol}/_data/provisioning/dashboards/network-traffic.json",
       "sudo cp /tmp/grafana-provisioning/homelab-server.json /var/lib/docker/volumes/${var.grafana_data_vol}/_data/provisioning/dashboards/homelab-server.json",
+      "sudo rm -f /var/lib/docker/volumes/${var.grafana_data_vol}/_data/provisioning/dashboards/network-traffic.json",
       "sudo chown -R 472:472 /var/lib/docker/volumes/${var.grafana_data_vol}/_data",
       "rm -rf /tmp/grafana-provisioning"
     ]

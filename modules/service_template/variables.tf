@@ -115,6 +115,15 @@ variable "capabilities" {
   default = null
 }
 
+variable "devices" {
+  description = "Device mappings from host to container"
+  type = list(object({
+    host_path      = string
+    container_path = string
+  }))
+  default = []
+}
+
 variable "init" {
   description = "Run an init process inside the container"
   type        = bool

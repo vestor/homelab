@@ -97,3 +97,15 @@ variable "local_ip" {
   type        = string
   default     = ""
 }
+
+variable "storage_disks" {
+  description = "List of disk UUIDs in the mergerfs storage pool"
+  type        = list(string)
+  default     = []
+}
+
+variable "storage_mount_base" {
+  description = "Base path where individual disks are mounted"
+  type        = string
+  default     = "/mnt/disks"
+}

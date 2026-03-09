@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Palworld / Pal Editor toggle service.
 
-A minimal HTTP server that lets you switch between the Palworld game server
-and the Pal Editor.  Communicates with the Docker daemon over the unix socket.
+A minimal HTTP server that lets you start and stop the Palworld game server
+and the Pal Editor independently.  Communicates with the Docker daemon over
+the unix socket.
 """
 
 import http.client
 import json
 import socket
-import time
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 DOCKER_SOCKET = "/var/run/docker.sock"
 PALWORLD_CONTAINER = "palworld"
 PALEDIT_CONTAINER = "paledit"
+VALID_CONTAINERS = {PALWORLD_CONTAINER, PALEDIT_CONTAINER}
 
 
 class DockerSocketConnection(http.client.HTTPConnection):
@@ -48,20 +51,40 @@ def container_status(name):
     return "not found"
 
 
+def container_logs(name, tail=5):
+    """Return last N lines of container logs."""
+    status, data = docker_request(
+        "GET", f"/containers/{name}/logs?stdout=1&stderr=1&tail={tail}"
+    )
+    if status == 200:
+        # Docker logs have 8-byte header per frame, strip them
+        lines = []
+        raw = data
+        while len(raw) > 8:
+            # First 4 bytes: stream type, next 4: size (big-endian)
+            size = int.from_bytes(raw[4:8], "big")
+            if size == 0 or len(raw) < 8 + size:
+                break
+            chunk = raw[8 : 8 + size].decode("utf-8", errors="replace").strip()
+            if chunk:
+                lines.append(chunk)
+            raw = raw[8 + size :]
+        # If framing didn't work (TTY mode), fall back to raw decode
+        if not lines and data:
+            lines = data.decode("utf-8", errors="replace").strip().splitlines()[-tail:]
+        return lines[-tail:]
+    return []
+
+
 def stop_container(name):
     docker_request("POST", f"/containers/{name}/stop?t=30")
-    # Wait briefly for it to actually stop
-    for _ in range(15):
-        if container_status(name) != "running":
-            return
-        time.sleep(1)
 
 
 def start_container(name):
     docker_request("POST", f"/containers/{name}/start")
 
 
-HTML_TEMPLATE = """\
+HTML_PAGE = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,8 +92,8 @@ HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Palworld Toggle</title>
 <style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: hsl(240 10% 8%);
     color: hsl(0 0% 85%);
@@ -80,72 +103,177 @@ HTML_TEMPLATE = """\
     justify-content: center;
     min-height: 100vh;
     padding: 1rem;
-  }}
-  h2 {{
+  }
+  h2 {
     font-size: 1rem;
     font-weight: 500;
     margin-bottom: 1rem;
     color: hsl(0 0% 70%);
-  }}
-  .status {{
+  }
+  .containers {
     display: flex;
-    gap: 1.5rem;
-    margin-bottom: 1.2rem;
-    font-size: 0.85rem;
-  }}
-  .status span {{
+    gap: 2rem;
+    margin-bottom: 1rem;
+  }
+  .container-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .label {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-  }}
-  .dot {{
+    font-size: 0.85rem;
+  }
+  .dot {
     width: 8px; height: 8px;
     border-radius: 50%;
     display: inline-block;
-  }}
-  .dot.running {{ background: hsl(120 50% 55%); }}
-  .dot.stopped {{ background: hsl(0 60% 55%); }}
-  .buttons {{
+  }
+  .dot.running { background: hsl(120 50% 55%); }
+  .dot.stopped { background: hsl(0 60% 55%); }
+  .actions {
     display: flex;
-    gap: 0.8rem;
-  }}
-  button {{
-    padding: 0.6rem 1.2rem;
+    gap: 0.5rem;
+  }
+  button {
+    padding: 0.5rem 1rem;
     border: 1px solid hsl(0 0% 25%);
     border-radius: 6px;
     background: hsl(240 8% 14%);
     color: hsl(0 0% 85%);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     cursor: pointer;
     transition: background 0.15s;
-  }}
-  button:hover {{
+  }
+  button:hover {
     background: hsl(240 8% 20%);
-  }}
-  button:disabled {{
+  }
+  button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-  }}
-  button.active {{
-    border-color: hsl(120 40% 40%);
+  }
+  button.start:hover:not(:disabled) {
     background: hsl(120 20% 15%);
-  }}
+    border-color: hsl(120 40% 30%);
+  }
+  button.stop:hover:not(:disabled) {
+    background: hsl(0 20% 15%);
+    border-color: hsl(0 40% 30%);
+  }
+  button.loading {
+    opacity: 0.6;
+    cursor: wait;
+  }
+  .logs {
+    width: 100%;
+    max-width: 600px;
+    margin-top: 0.5rem;
+  }
+  .log-section {
+    margin-bottom: 0.8rem;
+  }
+  .log-title {
+    font-size: 0.75rem;
+    color: hsl(0 0% 50%);
+    margin-bottom: 0.3rem;
+  }
+  .log-lines {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: hsl(0 0% 60%);
+    background: hsl(240 8% 6%);
+    border: 1px solid hsl(0 0% 15%);
+    border-radius: 4px;
+    padding: 0.5rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+  }
 </style>
 </head>
 <body>
-  <h2>Palworld Server Toggle</h2>
-  <div class="status">
-    <span><span class="dot {palworld_dot}"></span>Palworld: {palworld_status}</span>
-    <span><span class="dot {paledit_dot}"></span>Pal Editor: {paledit_status}</span>
+  <h2>Palworld Server Control</h2>
+  <div class="containers">
+    <div class="container-card">
+      <div class="label"><span class="dot" id="pw-dot"></span><span id="pw-label">Palworld: ...</span></div>
+      <div class="actions">
+        <button class="start" onclick="action('start','palworld')" id="pw-start">Start</button>
+        <button class="stop" onclick="action('stop','palworld')" id="pw-stop">Stop</button>
+      </div>
+    </div>
+    <div class="container-card">
+      <div class="label"><span class="dot" id="pe-dot"></span><span id="pe-label">Pal Editor: ...</span></div>
+      <div class="actions">
+        <button class="start" onclick="action('start','paledit')" id="pe-start">Start</button>
+        <button class="stop" onclick="action('stop','paledit')" id="pe-stop">Stop</button>
+      </div>
+    </div>
   </div>
-  <div class="buttons">
-    <form method="POST" action="/toggle/editor" style="display:inline">
-      <button type="submit" {editor_disabled}>Start Pal Editor</button>
-    </form>
-    <form method="POST" action="/toggle/server" style="display:inline">
-      <button type="submit" {server_disabled}>Start Palworld Server</button>
-    </form>
+  <div class="logs">
+    <div class="log-section">
+      <div class="log-title">Palworld Logs</div>
+      <div class="log-lines" id="pw-logs">Loading...</div>
+    </div>
+    <div class="log-section">
+      <div class="log-title">Pal Editor Logs</div>
+      <div class="log-lines" id="pe-logs">Loading...</div>
+    </div>
   </div>
+<script>
+  let polling = null;
+
+  function updateUI(data) {
+    const pw = data.palworld;
+    const pe = data.paledit;
+
+    document.getElementById('pw-dot').className = 'dot ' + (pw.status === 'running' ? 'running' : 'stopped');
+    document.getElementById('pe-dot').className = 'dot ' + (pe.status === 'running' ? 'running' : 'stopped');
+    document.getElementById('pw-label').textContent = 'Palworld: ' + pw.status;
+    document.getElementById('pe-label').textContent = 'Pal Editor: ' + pe.status;
+
+    document.getElementById('pw-start').disabled = pw.status === 'running';
+    document.getElementById('pw-stop').disabled = pw.status !== 'running';
+    document.getElementById('pe-start').disabled = pe.status === 'running';
+    document.getElementById('pe-stop').disabled = pe.status !== 'running';
+
+    document.getElementById('pw-logs').textContent = pw.logs.join('\\n') || '(no logs)';
+    document.getElementById('pe-logs').textContent = pe.logs.join('\\n') || '(no logs)';
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/status');
+      const data = await r.json();
+      updateUI(data);
+    } catch(e) {}
+  }
+
+  async function action(act, container) {
+    // Disable all buttons during action
+    document.querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('loading'); });
+
+    try {
+      await fetch('/api/' + act + '/' + container, { method: 'POST' });
+    } catch(e) {}
+
+    // Start rapid polling for 10s to show logs updating
+    document.querySelectorAll('button').forEach(b => b.classList.remove('loading'));
+    if (polling) clearInterval(polling);
+    polling = setInterval(refresh, 1000);
+    setTimeout(() => { clearInterval(polling); polling = setInterval(refresh, 5000); }, 10000);
+
+    refresh();
+  }
+
+  // Initial load and periodic refresh
+  refresh();
+  polling = setInterval(refresh, 5000);
+</script>
 </body>
 </html>
 """
@@ -154,45 +282,54 @@ HTML_TEMPLATE = """\
 class ToggleHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
-        if self.path != "/":
-            self.send_response(404)
+        if self.path == "/":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
+            self.wfile.write(HTML_PAGE.encode())
             return
 
-        pw_status = container_status(PALWORLD_CONTAINER)
-        pe_status = container_status(PALEDIT_CONTAINER)
+        if self.path == "/api/status":
+            data = {
+                "palworld": {
+                    "status": container_status(PALWORLD_CONTAINER),
+                    "logs": container_logs(PALWORLD_CONTAINER, 5),
+                },
+                "paledit": {
+                    "status": container_status(PALEDIT_CONTAINER),
+                    "logs": container_logs(PALEDIT_CONTAINER, 5),
+                },
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+            return
 
-        pw_running = pw_status == "running"
-        pe_running = pe_status == "running"
-
-        html = HTML_TEMPLATE.format(
-            palworld_status=pw_status,
-            paledit_status=pe_status,
-            palworld_dot="running" if pw_running else "stopped",
-            paledit_dot="running" if pe_running else "stopped",
-            editor_disabled='class="active" disabled' if pe_running else "",
-            server_disabled='class="active" disabled' if pw_running else "",
-        )
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_response(404)
         self.end_headers()
-        self.wfile.write(html.encode())
 
     def do_POST(self):
-        if self.path == "/toggle/editor":
-            stop_container(PALWORLD_CONTAINER)
-            start_container(PALEDIT_CONTAINER)
-        elif self.path == "/toggle/server":
-            stop_container(PALEDIT_CONTAINER)
-            start_container(PALWORLD_CONTAINER)
-        else:
-            self.send_response(404)
+        parts = self.path.strip("/").split("/")
+        # /api/start/<name> or /api/stop/<name>
+        if len(parts) == 3 and parts[0] == "api" and parts[2] in VALID_CONTAINERS:
+            name = parts[2]
+            if parts[1] == "start":
+                threading.Thread(target=start_container, args=(name,), daemon=True).start()
+            elif parts[1] == "stop":
+                threading.Thread(target=stop_container, args=(name,), daemon=True).start()
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
+            self.wfile.write(b'{"ok":true}')
             return
 
-        self.send_response(303)
-        self.send_header("Location", "/")
+        self.send_response(404)
         self.end_headers()
 
     def log_message(self, format, *args):

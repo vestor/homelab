@@ -184,6 +184,9 @@ module "dashboard" {
     module.monitoring.glance_services,
   )
 
+  storage_disks       = var.storage_disks
+  storage_mount_base  = var.storage_mount_base
+
   speedtest_url       = "http://speedtest:80"
   speedtest_api_token = var.speedtest_api_token
   uptime_kuma_url     = "https://uptime.${var.domain_name}"
