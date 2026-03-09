@@ -368,14 +368,18 @@ pages:
             feeds:
               - url: https://lobste.rs/rss
 
-  - name: Services
+  - name: Gaming
     columns:
       - size: full
         widgets:
           - type: iframe
-            source: https://toggle.${domain_name}
-            height: 200
+            source: https://${domain_name}/gaming
+            height: 500
 
+  - name: Services
+    columns:
+      - size: full
+        widgets:
           - type: monitor
             cache: 1m
             title: Service Health

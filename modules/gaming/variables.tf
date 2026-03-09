@@ -88,3 +88,15 @@ variable "paledit_password" {
   type        = string
   sensitive   = true
 }
+
+# Satisfactory Variables
+variable "satisfactory_config_vol" {
+  description = "Docker volume for Satisfactory server configuration"
+  type        = string
+}
+
+variable "satisfactory_max_players" {
+  description = "Maximum number of players allowed on the Satisfactory server"
+  type        = number
+  default     = 4
+}

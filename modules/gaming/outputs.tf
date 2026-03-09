@@ -17,5 +17,13 @@ output "glance_services" {
       internal_url = ""
       github_repo  = ""
     },
+    {
+      name         = "Satisfactory"
+      group        = "Gaming"
+      url          = ""
+      icon         = ""
+      internal_url = ""
+      github_repo  = ""
+    },
   ]
 }

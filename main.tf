@@ -211,6 +211,7 @@ module "gaming" {
   traefik_network_id         = module.core.traefik_network_id
   palworld_config_vol        = module.core.palworld_config_vol
   palworld_toggle_data_vol   = module.core.palworld_toggle_data_vol
+  satisfactory_config_vol    = module.core.satisfactory_config_vol
   palworld_server_password   = var.palworld_server_password
   palworld_admin_password    = var.palworld_admin_password
   palworld_player_count      = var.palworld_player_count

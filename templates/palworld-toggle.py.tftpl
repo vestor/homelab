@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
-"""Palworld / Pal Editor toggle service.
+"""Gaming server toggle service.
 
-A minimal HTTP server that lets you start and stop the Palworld game server
-and the Pal Editor independently.  Communicates with the Docker daemon over
-the unix socket.
+A minimal HTTP server that lets you start and stop game servers
+(Palworld, Pal Editor, Satisfactory) independently.  Communicates with
+the Docker daemon over the unix socket and queries game-specific APIs
+for live stats.
 """
 
+import base64
 import http.client
 import json
+import os
 import socket
+import ssl
 import threading
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
 
 DOCKER_SOCKET = "/var/run/docker.sock"
 PALWORLD_CONTAINER = "palworld"
 PALEDIT_CONTAINER = "paledit"
-VALID_CONTAINERS = {PALWORLD_CONTAINER, PALEDIT_CONTAINER}
+SATISFACTORY_CONTAINER = "satisfactory"
+VALID_CONTAINERS = {PALWORLD_CONTAINER, PALEDIT_CONTAINER, SATISFACTORY_CONTAINER}
+
+# Game API config
+PALWORLD_API_HOST = "palworld"
+PALWORLD_API_PORT = 8212
+PALWORLD_ADMIN_PASSWORD = os.environ.get("PALWORLD_ADMIN_PASSWORD", "")
+
+SATISFACTORY_API_HOST = "satisfactory"
+SATISFACTORY_API_PORT = 7777
+
+# Cache for Satisfactory auth token
+_satisfactory_token = None
 
 
 class DockerSocketConnection(http.client.HTTPConnection):
@@ -42,13 +58,63 @@ def docker_request(method, path, body=None):
     return status, data
 
 
-def container_status(name):
-    """Return the container state (running/exited/…) or 'unknown'."""
+# ---------------------------------------------------------------------------
+# Docker container helpers
+# ---------------------------------------------------------------------------
+
+def container_info(name):
+    """Return container state and uptime."""
     status, data = docker_request("GET", f"/containers/{name}/json")
     if status == 200:
         info = json.loads(data)
-        return info.get("State", {}).get("Status", "unknown")
-    return "not found"
+        state = info.get("State", {})
+        container_status = state.get("Status", "unknown")
+        started_at = state.get("StartedAt", "")
+        uptime = ""
+        if container_status == "running" and started_at:
+            try:
+                start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                delta = datetime.now(timezone.utc) - start
+                days = delta.days
+                hours, rem = divmod(delta.seconds, 3600)
+                minutes = rem // 60
+                if days > 0:
+                    uptime = f"{days}d {hours}h {minutes}m"
+                elif hours > 0:
+                    uptime = f"{hours}h {minutes}m"
+                else:
+                    uptime = f"{minutes}m"
+            except (ValueError, TypeError):
+                pass
+        return container_status, uptime
+    return "not found", ""
+
+
+def container_stats(name):
+    """Return CPU % and memory usage from Docker stats."""
+    try:
+        status, data = docker_request("GET", f"/containers/{name}/stats?stream=false")
+        if status != 200:
+            return None
+        stats = json.loads(data)
+        cpu_pct = 0.0
+        try:
+            cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"]
+            system_delta = stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"]
+            num_cpus = stats["cpu_stats"].get("online_cpus", 1)
+            if system_delta > 0:
+                cpu_pct = cpu_delta / system_delta * num_cpus * 100
+        except (KeyError, TypeError, ZeroDivisionError):
+            pass
+        mem_usage = stats.get("memory_stats", {}).get("usage", 0)
+        mem_limit = stats.get("memory_stats", {}).get("limit", 0)
+        return {
+            "cpu_pct": round(cpu_pct, 1),
+            "mem_mb": round(mem_usage / (1024 * 1024), 1),
+            "mem_limit_mb": round(mem_limit / (1024 * 1024), 1),
+        }
+    except Exception:
+        return None
 
 
 def container_logs(name, tail=5):
@@ -57,11 +123,9 @@ def container_logs(name, tail=5):
         "GET", f"/containers/{name}/logs?stdout=1&stderr=1&tail={tail}"
     )
     if status == 200:
-        # Docker logs have 8-byte header per frame, strip them
         lines = []
         raw = data
         while len(raw) > 8:
-            # First 4 bytes: stream type, next 4: size (big-endian)
             size = int.from_bytes(raw[4:8], "big")
             if size == 0 or len(raw) < 8 + size:
                 break
@@ -69,7 +133,6 @@ def container_logs(name, tail=5):
             if chunk:
                 lines.append(chunk)
             raw = raw[8 + size :]
-        # If framing didn't work (TTY mode), fall back to raw decode
         if not lines and data:
             lines = data.decode("utf-8", errors="replace").strip().splitlines()[-tail:]
         return lines[-tail:]
@@ -84,48 +147,210 @@ def start_container(name):
     docker_request("POST", f"/containers/{name}/start")
 
 
+# ---------------------------------------------------------------------------
+# Game-specific API queries
+# ---------------------------------------------------------------------------
+
+def _http_request(host, port, method, path, headers=None, body=None, use_ssl=False, timeout=3):
+    """Make an HTTP(S) request with a short timeout."""
+    try:
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
+        else:
+            conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        conn.request(method, path, body=body, headers=headers or {})
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        return resp.status, data
+    except Exception:
+        return 0, b""
+
+
+def palworld_game_stats():
+    """Query Palworld REST API for game metrics and player list."""
+    if not PALWORLD_ADMIN_PASSWORD:
+        return None
+    try:
+        auth = base64.b64encode(f"admin:{PALWORLD_ADMIN_PASSWORD}".encode()).decode()
+        headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+
+        # Get metrics
+        status, data = _http_request(
+            PALWORLD_API_HOST, PALWORLD_API_PORT, "GET", "/v1/api/metrics", headers
+        )
+        if status != 200:
+            return None
+        metrics = json.loads(data)
+
+        # Get player list
+        players = []
+        status2, data2 = _http_request(
+            PALWORLD_API_HOST, PALWORLD_API_PORT, "GET", "/v1/api/players", headers
+        )
+        if status2 == 200:
+            pdata = json.loads(data2)
+            players = pdata.get("players", [])
+
+        return {
+            "players_online": metrics.get("currentplayernum", 0),
+            "max_players": metrics.get("maxplayernum", 0),
+            "server_fps": round(metrics.get("serverfps", 0)),
+            "in_game_days": metrics.get("days", 0),
+            "player_list": [
+                {"name": p.get("name", "?"), "level": p.get("level", 0)}
+                for p in players
+            ],
+        }
+    except Exception:
+        return None
+
+
+def _satisfactory_api_call(function_name, data=None, auth_token=None):
+    """Call a Satisfactory HTTPS API function."""
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    body = json.dumps({"function": function_name, "data": data or {}})
+    return _http_request(
+        SATISFACTORY_API_HOST, SATISFACTORY_API_PORT,
+        "POST", "/api/v1", headers, body, use_ssl=True
+    )
+
+
+def _satisfactory_get_token():
+    """Get or refresh Satisfactory auth token."""
+    global _satisfactory_token
+    if _satisfactory_token:
+        # Test existing token
+        status, _ = _satisfactory_api_call("QueryServerState", auth_token=_satisfactory_token)
+        if status == 200 or status == 204:
+            return _satisfactory_token
+    # Try passwordless login first (works if no admin password set)
+    status, data = _satisfactory_api_call("PasswordlessLogin", {"minimumPrivilegeLevel": "Administrator"})
+    if status == 200:
+        try:
+            _satisfactory_token = json.loads(data).get("data", {}).get("authenticationToken")
+            if _satisfactory_token:
+                return _satisfactory_token
+        except Exception:
+            pass
+    _satisfactory_token = None
+    return None
+
+
+def satisfactory_game_stats():
+    """Query Satisfactory HTTPS API for game state."""
+    try:
+        # Health check (no auth needed)
+        status, data = _satisfactory_api_call("HealthCheck", {"clientCustomData": ""})
+        if status == 0:
+            return None  # Server not reachable
+        health = "unknown"
+        if status == 200:
+            try:
+                health = json.loads(data).get("data", {}).get("health", "unknown")
+            except Exception:
+                pass
+
+        result = {"health": health}
+
+        # Try authenticated query for detailed stats
+        token = _satisfactory_get_token()
+        if token:
+            status2, data2 = _satisfactory_api_call("QueryServerState", auth_token=token)
+            if status2 in (200, 204):
+                try:
+                    state = json.loads(data2).get("data", {}).get("serverGameState", {})
+                    result.update({
+                        "players_online": state.get("numConnectedPlayers", 0),
+                        "max_players": state.get("playerLimit", 0),
+                        "tech_tier": state.get("techTier", 0),
+                        "session_name": state.get("activeSessionName", ""),
+                        "game_duration_hours": round(state.get("totalGameDuration", 0) / 3600, 1),
+                        "tick_rate": round(state.get("averageTickRate", 0), 1),
+                        "game_running": state.get("isGameRunning", False),
+                    })
+                except Exception:
+                    pass
+
+        return result
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Aggregate container data
+# ---------------------------------------------------------------------------
+
+def get_container_data(name):
+    """Get all info for a container: status, uptime, stats, logs, game stats."""
+    c_status, uptime = container_info(name)
+    stats = container_stats(name) if c_status == "running" else None
+    logs = container_logs(name, 5)
+
+    game = None
+    if c_status == "running":
+        if name == PALWORLD_CONTAINER:
+            game = palworld_game_stats()
+        elif name == SATISFACTORY_CONTAINER:
+            game = satisfactory_game_stats()
+
+    return {
+        "status": c_status,
+        "uptime": uptime,
+        "stats": stats,
+        "logs": logs,
+        "game": game,
+    }
+
+
 HTML_PAGE = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Palworld Toggle</title>
+<title>Gaming Server Control</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: hsl(240 10% 8%);
     color: hsl(0 0% 85%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
+    padding: 1.5rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  .card {
+    background: hsl(240 8% 11%);
+    border: 1px solid hsl(0 0% 15%);
+    border-radius: 8px;
     padding: 1rem;
-  }
-  h2 {
-    font-size: 1rem;
-    font-weight: 500;
-    margin-bottom: 1rem;
-    color: hsl(0 0% 70%);
-  }
-  .containers {
-    display: flex;
-    gap: 2rem;
-    margin-bottom: 1rem;
-  }
-  .container-card {
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 0.6rem;
   }
-  .label {
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: hsl(0 0% 90%);
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
+    gap: 0.5rem;
   }
   .dot {
     width: 8px; height: 8px;
@@ -134,12 +359,53 @@ HTML_PAGE = """\
   }
   .dot.running { background: hsl(120 50% 55%); }
   .dot.stopped { background: hsl(0 60% 55%); }
+  .status-text {
+    font-size: 0.75rem;
+    color: hsl(0 0% 55%);
+  }
+  .stats-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    font-size: 0.72rem;
+    color: hsl(0 0% 60%);
+  }
+  .stat strong {
+    color: hsl(40 60% 55%);
+  }
+  .game-stats {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    padding: 0.4rem 0.5rem;
+    background: hsl(240 8% 9%);
+    border-radius: 4px;
+    border: 1px solid hsl(0 0% 13%);
+  }
+  .game-stat {
+    font-size: 0.72rem;
+    color: hsl(0 0% 60%);
+  }
+  .game-stat strong {
+    color: hsl(150 50% 55%);
+  }
+  .player-list {
+    font-size: 0.7rem;
+    color: hsl(0 0% 60%);
+    margin-top: 0.2rem;
+  }
+  .player-list span {
+    color: hsl(200 50% 65%);
+  }
   .actions {
     display: flex;
     gap: 0.5rem;
   }
   button {
-    padding: 0.5rem 1rem;
+    flex: 1;
+    padding: 0.4rem 0.8rem;
     border: 1px solid hsl(0 0% 25%);
     border-radius: 6px;
     background: hsl(240 8% 14%);
@@ -148,13 +414,8 @@ HTML_PAGE = """\
     cursor: pointer;
     transition: background 0.15s;
   }
-  button:hover {
-    background: hsl(240 8% 20%);
-  }
-  button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
+  button:hover { background: hsl(240 8% 20%); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.start:hover:not(:disabled) {
     background: hsl(120 20% 15%);
     border-color: hsl(120 40% 30%);
@@ -163,114 +424,164 @@ HTML_PAGE = """\
     background: hsl(0 20% 15%);
     border-color: hsl(0 40% 30%);
   }
-  button.loading {
-    opacity: 0.6;
-    cursor: wait;
-  }
-  .logs {
-    width: 100%;
-    max-width: 600px;
-    margin-top: 0.5rem;
-  }
-  .log-section {
-    margin-bottom: 0.8rem;
-  }
-  .log-title {
-    font-size: 0.75rem;
-    color: hsl(0 0% 50%);
-    margin-bottom: 0.3rem;
-  }
+  button.loading { opacity: 0.6; cursor: wait; }
   .log-lines {
     font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     line-height: 1.4;
-    color: hsl(0 0% 60%);
+    color: hsl(0 0% 55%);
     background: hsl(240 8% 6%);
-    border: 1px solid hsl(0 0% 15%);
+    border: 1px solid hsl(0 0% 13%);
     border-radius: 4px;
-    padding: 0.5rem;
+    padding: 0.4rem;
     white-space: pre-wrap;
     word-break: break-all;
-    max-height: 120px;
+    max-height: 100px;
     overflow-y: auto;
+    flex: 1;
+  }
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
-  <h2>Palworld Server Control</h2>
-  <div class="containers">
-    <div class="container-card">
-      <div class="label"><span class="dot" id="pw-dot"></span><span id="pw-label">Palworld: ...</span></div>
+  <div class="grid">
+    <div class="card" id="card-palworld">
+      <div class="card-header">
+        <span class="card-title"><span class="dot" id="pw-dot"></span> Palworld</span>
+        <span class="status-text" id="pw-status">...</span>
+      </div>
+      <div class="stats-row" id="pw-stats"></div>
+      <div id="pw-game"></div>
       <div class="actions">
         <button class="start" onclick="action('start','palworld')" id="pw-start">Start</button>
         <button class="stop" onclick="action('stop','palworld')" id="pw-stop">Stop</button>
       </div>
+      <div class="log-lines" id="pw-logs">Loading...</div>
     </div>
-    <div class="container-card">
-      <div class="label"><span class="dot" id="pe-dot"></span><span id="pe-label">Pal Editor: ...</span></div>
+    <div class="card" id="card-paledit">
+      <div class="card-header">
+        <span class="card-title"><span class="dot" id="pe-dot"></span> Pal Editor</span>
+        <span class="status-text" id="pe-status">...</span>
+      </div>
+      <div class="stats-row" id="pe-stats"></div>
       <div class="actions">
         <button class="start" onclick="action('start','paledit')" id="pe-start">Start</button>
         <button class="stop" onclick="action('stop','paledit')" id="pe-stop">Stop</button>
       </div>
-    </div>
-  </div>
-  <div class="logs">
-    <div class="log-section">
-      <div class="log-title">Palworld Logs</div>
-      <div class="log-lines" id="pw-logs">Loading...</div>
-    </div>
-    <div class="log-section">
-      <div class="log-title">Pal Editor Logs</div>
       <div class="log-lines" id="pe-logs">Loading...</div>
+    </div>
+    <div class="card" id="card-satisfactory">
+      <div class="card-header">
+        <span class="card-title"><span class="dot" id="sf-dot"></span> Satisfactory</span>
+        <span class="status-text" id="sf-status">...</span>
+      </div>
+      <div class="stats-row" id="sf-stats"></div>
+      <div id="sf-game"></div>
+      <div class="actions">
+        <button class="start" onclick="action('start','satisfactory')" id="sf-start">Start</button>
+        <button class="stop" onclick="action('stop','satisfactory')" id="sf-stop">Stop</button>
+      </div>
+      <div class="log-lines" id="sf-logs">Loading...</div>
     </div>
   </div>
 <script>
   let polling = null;
 
+  function renderStats(prefix, d) {
+    const el = document.getElementById(prefix + '-stats');
+    if (d.status !== 'running' || !d.stats) { el.innerHTML = ''; return; }
+    const s = d.stats;
+    el.innerHTML =
+      '<span class="stat">CPU <strong>' + s.cpu_pct + '%</strong></span>' +
+      '<span class="stat">MEM <strong>' + s.mem_mb + ' MB</strong></span>' +
+      (d.uptime ? '<span class="stat">UP <strong>' + d.uptime + '</strong></span>' : '');
+  }
+
+  function renderPalworldGame(d) {
+    const el = document.getElementById('pw-game');
+    if (!d.game) { el.innerHTML = ''; return; }
+    const g = d.game;
+    let html = '<div class="game-stats">' +
+      '<span class="game-stat">Players <strong>' + g.players_online + '/' + g.max_players + '</strong></span>' +
+      '<span class="game-stat">FPS <strong>' + g.server_fps + '</strong></span>' +
+      '<span class="game-stat">Day <strong>' + g.in_game_days + '</strong></span>' +
+      '</div>';
+    if (g.player_list && g.player_list.length > 0) {
+      html += '<div class="player-list">Online: ' +
+        g.player_list.map(p => '<span>' + p.name + '</span> (Lv' + p.level + ')').join(', ') +
+        '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function renderSatisfactoryGame(d) {
+    const el = document.getElementById('sf-game');
+    if (!d.game) { el.innerHTML = ''; return; }
+    const g = d.game;
+    let parts = [];
+    if (g.players_online !== undefined) {
+      parts.push('<span class="game-stat">Players <strong>' + g.players_online + '/' + g.max_players + '</strong></span>');
+    }
+    if (g.tech_tier) {
+      parts.push('<span class="game-stat">Tier <strong>' + g.tech_tier + '</strong></span>');
+    }
+    if (g.tick_rate) {
+      parts.push('<span class="game-stat">Tick <strong>' + g.tick_rate + '</strong></span>');
+    }
+    if (g.game_duration_hours) {
+      parts.push('<span class="game-stat">Played <strong>' + g.game_duration_hours + 'h</strong></span>');
+    }
+    if (g.session_name) {
+      parts.push('<span class="game-stat">Session <strong>' + g.session_name + '</strong></span>');
+    }
+    if (parts.length === 0) {
+      parts.push('<span class="game-stat">Health <strong>' + g.health + '</strong></span>');
+    }
+    el.innerHTML = '<div class="game-stats">' + parts.join('') + '</div>';
+  }
+
+  function updateCard(prefix, d) {
+    const running = d.status === 'running';
+    document.getElementById(prefix + '-dot').className = 'dot ' + (running ? 'running' : 'stopped');
+    document.getElementById(prefix + '-status').textContent = d.status + (d.uptime && running ? ' \\u00b7 ' + d.uptime : '');
+    document.getElementById(prefix + '-start').disabled = running;
+    document.getElementById(prefix + '-stop').disabled = !running;
+    document.getElementById(prefix + '-logs').textContent = d.logs.join('\\n') || '(no logs)';
+    renderStats(prefix, d);
+  }
+
   function updateUI(data) {
-    const pw = data.palworld;
-    const pe = data.paledit;
-
-    document.getElementById('pw-dot').className = 'dot ' + (pw.status === 'running' ? 'running' : 'stopped');
-    document.getElementById('pe-dot').className = 'dot ' + (pe.status === 'running' ? 'running' : 'stopped');
-    document.getElementById('pw-label').textContent = 'Palworld: ' + pw.status;
-    document.getElementById('pe-label').textContent = 'Pal Editor: ' + pe.status;
-
-    document.getElementById('pw-start').disabled = pw.status === 'running';
-    document.getElementById('pw-stop').disabled = pw.status !== 'running';
-    document.getElementById('pe-start').disabled = pe.status === 'running';
-    document.getElementById('pe-stop').disabled = pe.status !== 'running';
-
-    document.getElementById('pw-logs').textContent = pw.logs.join('\\n') || '(no logs)';
-    document.getElementById('pe-logs').textContent = pe.logs.join('\\n') || '(no logs)';
+    updateCard('pw', data.palworld);
+    renderPalworldGame(data.palworld);
+    updateCard('pe', data.paledit);
+    updateCard('sf', data.satisfactory);
+    renderSatisfactoryGame(data.satisfactory);
   }
 
   async function refresh() {
     try {
-      const r = await fetch('/api/status');
+      const base = location.pathname.startsWith('/gaming') ? '/gaming' : '';
+      const r = await fetch(base + '/api/status');
       const data = await r.json();
       updateUI(data);
     } catch(e) {}
   }
 
   async function action(act, container) {
-    // Disable all buttons during action
     document.querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('loading'); });
-
     try {
-      await fetch('/api/' + act + '/' + container, { method: 'POST' });
+      const base = location.pathname.startsWith('/gaming') ? '/gaming' : '';
+      await fetch(base + '/api/' + act + '/' + container, { method: 'POST' });
     } catch(e) {}
-
-    // Start rapid polling for 10s to show logs updating
     document.querySelectorAll('button').forEach(b => b.classList.remove('loading'));
     if (polling) clearInterval(polling);
     polling = setInterval(refresh, 1000);
     setTimeout(() => { clearInterval(polling); polling = setInterval(refresh, 5000); }, 10000);
-
     refresh();
   }
 
-  // Initial load and periodic refresh
   refresh();
   polling = setInterval(refresh, 5000);
 </script>
@@ -282,7 +593,7 @@ HTML_PAGE = """\
 class ToggleHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
-        if self.path == "/":
+        if self.path == "/" or self.path == "":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -291,14 +602,9 @@ class ToggleHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/status":
             data = {
-                "palworld": {
-                    "status": container_status(PALWORLD_CONTAINER),
-                    "logs": container_logs(PALWORLD_CONTAINER, 5),
-                },
-                "paledit": {
-                    "status": container_status(PALEDIT_CONTAINER),
-                    "logs": container_logs(PALEDIT_CONTAINER, 5),
-                },
+                "palworld": get_container_data(PALWORLD_CONTAINER),
+                "paledit": get_container_data(PALEDIT_CONTAINER),
+                "satisfactory": get_container_data(SATISFACTORY_CONTAINER),
             }
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

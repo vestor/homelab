@@ -38,6 +38,7 @@ resource "docker_volume" "volumes" {
     # Gaming
     "palworld_config",
     "palworld_toggle_data",
+    "satisfactory_config",
 
     # Network monitoring
     "speedtest_config", "uptime_kuma_data",

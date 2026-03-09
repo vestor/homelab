@@ -66,7 +66,9 @@ module "palworld" {
     "PAL_SPAWN_NUM_RATE=3.0",
     "COLLECTION_DROP_RATE=3.0",
     "ENEMY_DROP_ITEM_RATE=3.0",
-    "ENABLE_INVADER_ENEMY=false"
+    "ENABLE_INVADER_ENEMY=false",
+    "REST_API_ENABLED=true",
+    "REST_API_PORT=8212"
   ]
 
   volume_mappings = [
@@ -151,7 +153,7 @@ module "paledit" {
   custom_labels = {}
 }
 
-# Toggle service - controls palworld/paledit switching
+# Toggle service - controls game server switching and displays game stats
 module "palworld_toggle" {
   source     = "../service_template"
   depends_on = [null_resource.toggle_script]
@@ -164,7 +166,11 @@ module "palworld_toggle" {
   privileged     = true
   container_user = "0:0"
   command        = ["python", "/app/toggle.py"]
-  restrict_to_admins = false
+  restrict_to_admins = true
+
+  custom_env = [
+    "PALWORLD_ADMIN_PASSWORD=${var.palworld_admin_password}"
+  ]
 
   web_port     = 8090
   port_mappings = [
@@ -187,6 +193,61 @@ module "palworld_toggle" {
   ]
 
   custom_labels = {
-    "traefik.http.routers.palworld-toggle.rule" = "Host(`toggle.${var.domain_name}`)"
+    # Serve at pavish.online/gaming
+    "traefik.http.routers.palworld-toggle.rule"        = "Host(`${var.domain_name}`) && PathPrefix(`/gaming`)"
+    "traefik.http.routers.palworld-toggle.priority"    = "100"
+    "traefik.http.routers.palworld-toggle.middlewares"  = "strip-gaming,admin-only@file"
+    "traefik.http.middlewares.strip-gaming.stripprefix.prefixes" = "/gaming"
+    "traefik.http.middlewares.strip-gaming.stripprefix.forceSlash" = "false"
+
+    # Redirect toggle.pavish.online -> pavish.online/gaming
+    "traefik.http.routers.toggle-redirect.rule"              = "Host(`toggle.${var.domain_name}`)"
+    "traefik.http.routers.toggle-redirect.entrypoints"       = "web,websecure"
+    "traefik.http.routers.toggle-redirect.tls"               = "true"
+    "traefik.http.routers.toggle-redirect.tls.certresolver"  = "cloudflare"
+    "traefik.http.routers.toggle-redirect.middlewares"        = "toggle-to-gaming"
+    "traefik.http.middlewares.toggle-to-gaming.redirectregex.regex"       = ".*"
+    "traefik.http.middlewares.toggle-to-gaming.redirectregex.replacement" = "https://${var.domain_name}/gaming"
+    "traefik.http.middlewares.toggle-to-gaming.redirectregex.permanent"   = "true"
   }
+}
+
+# Satisfactory dedicated server
+module "satisfactory" {
+  source = "../service_template"
+
+  service_name   = "satisfactory"
+  image          = "wolveix/satisfactory-server:latest"
+  domain_name    = var.domain_name
+  timezone       = var.timezone
+  network_ids    = local.networks
+  enable_traefik = false  # Game server, not HTTP
+  must_run       = false  # Managed externally
+
+  port_mappings = [
+    {
+      internal = 7777
+      external = 7777
+      protocol = "udp"
+    },
+    {
+      internal = 7777
+      external = 7777
+      protocol = "tcp"
+    }
+  ]
+
+  custom_env = [
+    "MAXPLAYERS=${var.satisfactory_max_players}",
+    "STEAMBETA=false"
+  ]
+
+  volume_mappings = [
+    {
+      volume_name    = var.satisfactory_config_vol
+      container_path = "/config"
+    }
+  ]
+
+  custom_labels = {}
 }

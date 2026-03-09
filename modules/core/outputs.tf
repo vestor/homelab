@@ -121,6 +121,11 @@ output "palworld_toggle_data_vol" {
   value       = docker_volume.volumes["palworld_toggle_data"].name
 }
 
+output "satisfactory_config_vol" {
+  description = "Docker volume for Satisfactory server configuration"
+  value       = docker_volume.volumes["satisfactory_config"].name
+}
+
 # Volume outputs - for network monitoring
 output "speedtest_config_vol" {
   description = "Docker volume for Speedtest Tracker configuration"
